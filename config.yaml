@@ -1,0 +1,71 @@
+# MedAssist.AI Data Ingestion Configuration
+# All data sources are FREE - no subscription required
+
+paths:
+  raw: data/raw
+  normalized: data/normalized
+  metadata: data/metadata
+  schema: data/schema
+
+defaults:
+  batch_size: 500
+  max_records_per_fetch: 10000
+
+sources:
+  pubmed:
+    base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+    batch_size: 200
+    rate_limit_per_sec: 3
+
+  pmc:
+    base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+    db: pmc
+    batch_size: 200
+    rate_limit_per_sec: 3
+
+  openfda:
+    base_url: https://api.fda.gov
+    endpoints:
+      label: /drug/label.json
+      event: /drug/event.json
+      ndc: /drug/ndc.json
+    batch_size: 1000  # OpenFDA max per request
+    rate_limit_per_sec: 5
+
+  orphanet:
+    rate_limit_per_sec: 1
+    # Official Orphadata (bi-annual releases: July, December)
+    base_url: https://www.orphadata.com/data/xml
+    phenotypes_url: https://www.orphadata.com/data/xml/en_product4.xml
+    diseases_url: https://www.orphadata.com/data/xml/en_product6.xml
+    genes_url: https://www.orphadata.com/data/xml/en_product1.xml
+    # Alternative: Orphadata_aggregated on GitHub (may be older)
+    github_base: https://raw.githubusercontent.com/Orphanet/Orphadata_aggregated/master
+
+  rxnorm:
+    base_url: https://rxnav.nlm.nih.gov/REST
+    batch_size: 100
+
+  who:
+    base_url: https://www.who.int/api
+    endpoints:
+      documents: /documents
+      guidelines: /news/daguidelines
+
+  ncbi_bookshelf:
+    base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+    db: books
+    batch_size: 50
+    rate_limit_per_sec: 3
+
+  openstax:
+    base_url: https://assets.openstax.org/oscms-prodcms/media/documents
+    books:
+      anatomy-physiology-2e: "https://assets.openstax.org/oscms-prodcms/media/documents/Anatomy_and_Physiology_2e_-_WEB_c9nD9QL.pdf"
+      biology-2e: "https://assets.openstax.org/oscms-prodcms/media/documents/Biology2e-WEB.pdf"
+      microbiology: "https://assets.openstax.org/oscms-prodcms/media/documents/Microbiology-WEB.pdf"
+      pharmacology: "https://assets.openstax.org/oscms-prodcms/media/documents/Pharmacology-WEB.pdf"
+      medical-surgical-nursing: "https://assets.openstax.org/oscms-prodcms/media/documents/Medical-Surgical_Nursing-WEB.pdf"
+      fundamentals-nursing: "https://assets.openstax.org/oscms-prodcms/media/documents/Fundamentals_of_Nursing_-_WEB.pdf"
+      clinical-nursing-skills: "https://assets.openstax.org/oscms-prodcms/media/documents/Clinical-Nursing-Skills-WEB.pdf"
+    rate_limit_per_sec: 1

@@ -58,7 +58,7 @@ class BaseFetcher(ABC):
     def _get(self, url: str, params: Optional[dict] = None, **kwargs) -> requests.Response:
         """GET request with retry and rate limiting."""
         self._rate_limit()
-        return requests.get(url, params=params, timeout=60, **kwargs)
+        return requests.get(url, params=params, timeout=120, **kwargs)
 
     @retry(
         retry=retry_if_exception_type((requests.RequestException, ConnectionError)),

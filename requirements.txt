@@ -4,3 +4,6 @@ python-dotenv>=1.0.0
 tenacity>=8.2.0
 lxml>=5.0.0
 PyMuPDF>=1.23.0
+sentence-transformers>=2.7,<3
+chromadb>=0.4.0
+snowflake-connector-python>=3.0.0

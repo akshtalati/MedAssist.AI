@@ -49,9 +49,12 @@ class RxNormFetcher(BaseFetcher):
         resp.raise_for_status()
         data = resp.json()
 
-        # Normalize response structure
-        if "approximateTerm" in data:
-            candidates = data.get("approximateTerm", {}).get("candidate", [])
+        # Normalize response structure (API may return approximateTerm or approximateGroup)
+        candidates = (
+            data.get("approximateTerm", {}).get("candidate")
+            or data.get("approximateGroup", {}).get("candidate")
+        )
+        if candidates is not None:
             if isinstance(candidates, dict):
                 candidates = [candidates]
             drugs = candidates[:max_records]
