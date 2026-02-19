@@ -210,3 +210,6 @@ __marimo__/
 data/raw/
 data/normalized/
 data/metadata/
+data/vectors/
+data/.pipeline_checkpoint.json
+data/.fetch_checkpoint.json

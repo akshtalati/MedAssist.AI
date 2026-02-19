@@ -28,10 +28,9 @@ class OpenFDAFetcher(BaseFetcher):
         if search:
             params["search"] = search
         api_key = get_env("OPENFDA_API_KEY")
-        headers = {}
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        resp = self._get(url, params=params, headers=headers or None)
+            params["api_key"] = api_key
+        resp = self._get(url, params=params)
         resp.raise_for_status()
         return resp.json()
 
