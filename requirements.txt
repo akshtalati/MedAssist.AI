@@ -7,3 +7,4 @@ PyMuPDF>=1.23.0
 sentence-transformers>=2.7,<3
 chromadb>=0.4.0
 snowflake-connector-python>=3.0.0
+dbt-snowflake>=1.7.0
