@@ -2,12 +2,22 @@
 """
 Load MedAssist.AI data into Snowflake.
 
-Run snowflake_setup.sql first to create warehouse, database, and tables.
-Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD in .env.
+Prerequisites:
+  - Run snowflake_setup.sql to create warehouse, database, and tables.
+  - If you see "NORMALIZED.SYMPTOM_DISEASE_MAP does not exist", run scripts/ensure_normalized_schema.sql.
+  - Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD in .env.
+
+Usage:
+  python scripts/load_to_snowflake.py --all              # Load all sources
+  python scripts/load_to_snowflake.py --all --skip-loaded # Load only steps whose tables are empty (skip rest)
+  python scripts/load_to_snowflake.py --pubmed --pmc      # Load only PubMed and PMC
+
+Uses batch inserts (executemany) where safe; single-row inserts for large text/JSON to avoid Snowflake 252001.
 """
 
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,9 +25,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import get_data_paths, PROJECT_ROOT
 from src.snowflake_client import get_connection
 
+# Batch size for executemany(); larger = fewer round-trips but more memory per batch
+BATCH_SIZE = 1000
+# Smaller batch for tables with large text (abstract/title) to avoid Snowflake 252001 rewrite limit
+BATCH_SIZE_LARGE_TEXT = 25
+
+# For --skip-loaded: (step_key, list of tables to check; if any has rows, step is considered "loaded")
+SKIP_LOADED_CHECK = [
+    ("manifests", ["RAW.FETCH_MANIFESTS"]),
+    ("symptoms", ["NORMALIZED.SYMPTOM_DISEASE_MAP"]),
+    ("pubmed", ["RAW.PUBMED_ARTICLES"]),
+    ("pmc", ["RAW.PMC_ARTICLES"]),
+    ("openfda", ["RAW.OPENFDA_LABELS", "RAW.OPENFDA_EVENTS", "RAW.OPENFDA_NDC"]),
+    ("rxnorm", ["RAW.RXNORM_DRUGS"]),
+    ("who", ["RAW.WHO_DOCUMENTS"]),
+    ("ncbi_bookshelf", ["RAW.NCBI_BOOKSHELF"]),
+    ("openstax", ["RAW.OPENSTAX_BOOKS"]),
+    ("orphanet", ["RAW.ORPHANET_DISEASES", "RAW.ORPHANET_PHENOTYPES", "RAW.ORPHANET_GENES"]),
+    ("rag", ["VECTORS.RAG_CHUNKS"]),
+]
+
+
+def _table_row_count(cursor, table: str) -> int:
+    """Return row count for a single table (e.g. RAW.PUBMED_ARTICLES). Returns 0 on error."""
+    try:
+        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+        return cursor.fetchone()[0] or 0
+    except Exception:
+        return 0
+
+
+def _step_already_loaded(cursor, tables: list) -> tuple[bool, int]:
+    """If any of the tables has at least one row, return (True, total_rows). Else (False, 0)."""
+    total = 0
+    for t in tables:
+        total += _table_row_count(cursor, t)
+    return (total > 0, total)
+
 
 def load_manifests(cursor) -> int:
     """Load fetch manifests from data/metadata/."""
+    print(">>> Step 1/11: Loading manifests...", flush=True)
     meta_dir = PROJECT_ROOT / "data" / "metadata"
     if not meta_dir.exists():
         return 0
@@ -31,7 +79,7 @@ def load_manifests(cursor) -> int:
                 INSERT INTO RAW.FETCH_MANIFESTS
                 (source, fetch_id, fetched_at, api_endpoint, query_params, record_count,
                  total_available, file_path, checksum_sha256, status, error)
-                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                SELECT %s, %s, %s, %s, PARSE_JSON(%s), %s, %s, %s, %s, %s, %s
                 WHERE NOT EXISTS (SELECT 1 FROM RAW.FETCH_MANIFESTS WHERE source=%s AND fetch_id=%s)
                 """,
                 (
@@ -58,12 +106,19 @@ def load_manifests(cursor) -> int:
 
 def load_symptom_index(cursor) -> int:
     """Load symptom→disease map from data/normalized/symptom_index.json."""
+    print(">>> Step 2/11: Loading symptom index...", flush=True)
     path = PROJECT_ROOT / "data" / "normalized" / "symptom_index.json"
     if not path.exists():
         return 0
     with open(path) as f:
         data = json.load(f)
     stod = data.get("symptom_to_diseases", {})
+    sql = """
+        INSERT INTO NORMALIZED.SYMPTOM_DISEASE_MAP
+        (symptom, orpha_code, disease_name, frequency, hpo_id)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    batch = []
     count = 0
     for symptom, entries in stod.items():
         for entry in entries:
@@ -74,25 +129,34 @@ def load_symptom_index(cursor) -> int:
                 hpo = str(entry[3]) if len(entry) > 3 else ""
             else:
                 orpha, name, freq, hpo = "", "", "", ""
-            cursor.execute(
-                """
-                INSERT INTO NORMALIZED.SYMPTOM_DISEASE_MAP
-                (symptom, orpha_code, disease_name, frequency, hpo_id)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (symptom[:500], orpha[:20], name[:500], freq[:100], hpo[:50]),
-            )
-            count += 1
+            batch.append((symptom[:500], orpha[:20], name[:500], freq[:100], hpo[:50]))
+            if len(batch) >= BATCH_SIZE:
+                cursor.executemany(sql, batch)
+                count += len(batch)
+                print(f"  Symptom-disease rows: {count}...", flush=True)
+                batch = []
+    if batch:
+        cursor.executemany(sql, batch)
+        count += len(batch)
     return count
 
 
 def load_pubmed(cursor) -> int:
-    """Load PubMed articles from data/raw/pubmed/."""
+    """Load PubMed articles from data/raw/pubmed/. Uses single-row inserts to avoid Snowflake 252001."""
+    print(">>> Step 3/11: Loading PubMed articles...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "pubmed"
     if not raw_dir.exists():
         return 0
+    sql = """
+        INSERT INTO RAW.PUBMED_ARTICLES (pmid, title, abstract, journal, pub_date, source_file)
+        SELECT %s, %s, %s, %s, %s, %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.PUBMED_ARTICLES WHERE pmid=%s)
+    """
     count = 0
-    for f in raw_dir.glob("*.json"):
+    files = list(raw_dir.glob("*.json"))
+    for fi, f in enumerate(files):
+        if files:
+            print(f"  PubMed file {fi + 1}/{len(files)}: {f.name}", flush=True)
         try:
             with open(f) as fp:
                 data = json.load(fp)
@@ -101,35 +165,40 @@ def load_pubmed(cursor) -> int:
                 pmid = a.get("pmid")
                 if pmid is None:
                     continue
-                cursor.execute(
-                    """
-                    INSERT INTO RAW.PUBMED_ARTICLES (pmid, title, abstract, journal, pub_date, source_file)
-                    SELECT %s, %s, %s, %s, %s, %s
-                    WHERE NOT EXISTS (SELECT 1 FROM RAW.PUBMED_ARTICLES WHERE pmid=%s)
-                    """,
-                    (
-                        pmid,
-                        str(a.get("title", ""))[:1000],
-                        str(a.get("abstract", ""))[:100000],
-                        str(a.get("journal", ""))[:200],
-                        str(a.get("pub_date", ""))[:50],
-                        f.name,
-                        pmid,
-                    ),
+                row = (
+                    pmid,
+                    str(a.get("title", ""))[:1000],
+                    str(a.get("abstract", ""))[:100000],
+                    str(a.get("journal", ""))[:200],
+                    str(a.get("pub_date", ""))[:50],
+                    f.name,
+                    pmid,
                 )
+                cursor.execute(sql, row)
                 count += 1
+                if count % 5000 == 0:
+                    print(f"  PubMed rows: {count}...", flush=True)
         except Exception as e:
             print(f"  Skip {f.name}: {e}")
     return count
 
 
 def load_pmc(cursor) -> int:
-    """Load PMC articles from data/raw/pmc/."""
+    """Load PMC articles from data/raw/pmc/. Uses single-row inserts to avoid Snowflake 252001."""
+    print(">>> Step 4/11: Loading PMC articles...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "pmc"
     if not raw_dir.exists():
         return 0
+    sql = """
+        INSERT INTO RAW.PMC_ARTICLES (pmcid, title, abstract, journal, pub_date, source_file)
+        SELECT %s, %s, %s, %s, %s, %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.PMC_ARTICLES WHERE pmcid=%s)
+    """
     count = 0
-    for f in raw_dir.glob("*.json"):
+    files = list(raw_dir.glob("*.json"))
+    for fi, f in enumerate(files):
+        if files:
+            print(f"  PMC file {fi + 1}/{len(files)}: {f.name}", flush=True)
         try:
             with open(f) as fp:
                 data = json.load(fp)
@@ -138,30 +207,510 @@ def load_pmc(cursor) -> int:
                 pmcid = a.get("pmcid")
                 if not pmcid:
                     continue
-                cursor.execute(
-                    """
-                    INSERT INTO RAW.PMC_ARTICLES (pmcid, title, abstract, journal, pub_date, source_file)
-                    SELECT %s, %s, %s, %s, %s, %s
-                    WHERE NOT EXISTS (SELECT 1 FROM RAW.PMC_ARTICLES WHERE pmcid=%s)
-                    """,
-                    (
-                        str(pmcid)[:50],
-                        str(a.get("title", ""))[:1000],
-                        str(a.get("abstract", ""))[:100000],
-                        str(a.get("journal", ""))[:200],
-                        str(a.get("pub_date", ""))[:50],
-                        f.name,
-                        str(pmcid)[:50],
-                    ),
+                row = (
+                    str(pmcid)[:50],
+                    str(a.get("title", ""))[:1000],
+                    str(a.get("abstract", ""))[:100000],
+                    str(a.get("journal", ""))[:200],
+                    str(a.get("pub_date", ""))[:50],
+                    f.name,
+                    str(pmcid)[:50],
                 )
+                cursor.execute(sql, row)
                 count += 1
+                if count % 5000 == 0:
+                    print(f"  PMC rows: {count}...", flush=True)
         except Exception as e:
             print(f"  Skip {f.name}: {e}")
     return count
 
 
+def load_openfda(cursor) -> int:
+    """Load OpenFDA data from data/raw/openfda/{endpoint}/. Uses single-row inserts to avoid Snowflake 252001."""
+    print(">>> Step 5/11: Loading OpenFDA data...", flush=True)
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "openfda"
+    if not raw_dir.exists():
+        return 0
+
+    sql_label = """
+        INSERT INTO RAW.OPENFDA_LABELS
+        (application_number, product_ndc, brand_name, generic_name, manufacturer_name,
+         product_type, active_ingredient, inactive_ingredient, purpose,
+         indications_and_usage, warnings, dosage_and_administration, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s), PARSE_JSON(%s),
+               PARSE_JSON(%s), PARSE_JSON(%s), PARSE_JSON(%s), PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM RAW.OPENFDA_LABELS 
+            WHERE application_number=%s AND product_ndc=%s
+        )
+    """
+    sql_event = """
+        INSERT INTO RAW.OPENFDA_EVENTS
+        (safetyreportid, receivedate, serious, seriousnessdeath, seriousnesslifethreatening,
+         seriousnesshospitalization, seriousnessdisabling, seriousnessother,
+         patient, drug, reaction, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s), PARSE_JSON(%s), PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.OPENFDA_EVENTS WHERE safetyreportid=%s)
+    """
+    sql_ndc = """
+        INSERT INTO RAW.OPENFDA_NDC
+        (product_ndc, product_type, proprietary_name, non_proprietary_name, labeler_name, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.OPENFDA_NDC WHERE product_ndc=%s)
+    """
+    count = 0
+    for endpoint_dir in ["label", "event", "ndc"]:
+        endpoint_path = raw_dir / endpoint_dir
+        if not endpoint_path.exists():
+            continue
+        sql = sql_label if endpoint_dir == "label" else (sql_event if endpoint_dir == "event" else sql_ndc)
+        files = list(endpoint_path.glob("*.json"))
+        for file_idx, f in enumerate(files):
+            if files:
+                print(f"  OpenFDA {endpoint_dir}: file {file_idx + 1}/{len(files)} ({f.name})", flush=True)
+            try:
+                with open(f) as fp:
+                    data = json.load(fp)
+                payload = data.get("data", {})
+                results = payload.get("results", [])
+                for record in results:
+                    try:
+                        if endpoint_dir == "label":
+                            app_num = record.get("application_number", "")
+                            product_ndc = record.get("product_ndc", "")
+                            if not app_num and not product_ndc:
+                                continue
+                            row = (
+                                app_num[:50],
+                                product_ndc[:50],
+                                str(record.get("brand_name", [""])[0] if isinstance(record.get("brand_name"), list) else record.get("brand_name", ""))[:500],
+                                str(record.get("generic_name", [""])[0] if isinstance(record.get("generic_name"), list) else record.get("generic_name", ""))[:500],
+                                str(record.get("manufacturer_name", [""])[0] if isinstance(record.get("manufacturer_name"), list) else record.get("manufacturer_name", ""))[:500],
+                                str(record.get("product_type", ""))[:100],
+                                json.dumps(record.get("active_ingredient", [])),
+                                json.dumps(record.get("inactive_ingredient", [])),
+                                json.dumps(record.get("purpose", [])),
+                                json.dumps(record.get("indications_and_usage", [])),
+                                json.dumps(record.get("warnings", [])),
+                                json.dumps(record.get("dosage_and_administration", [])),
+                                json.dumps(record),
+                                f.name,
+                                app_num[:50],
+                                product_ndc[:50],
+                            )
+                        elif endpoint_dir == "event":
+                            safety_id = record.get("safetyreportid", "")
+                            if not safety_id:
+                                continue
+                            row = (
+                                str(safety_id)[:100],
+                                str(record.get("receivedate", ""))[:50],
+                                record.get("serious", 0),
+                                record.get("seriousnessdeath", 0),
+                                record.get("seriousnesslifethreatening", 0),
+                                record.get("seriousnesshospitalization", 0),
+                                record.get("seriousnessdisabling", 0),
+                                record.get("seriousnessother", 0),
+                                json.dumps(record.get("patient", {})),
+                                json.dumps(record.get("drug", [])),
+                                json.dumps(record.get("reaction", [])),
+                                json.dumps(record),
+                                f.name,
+                                str(safety_id)[:100],
+                            )
+                        elif endpoint_dir == "ndc":
+                            product_ndc = record.get("product_ndc", "")
+                            if not product_ndc:
+                                continue
+                            row = (
+                                product_ndc[:50],
+                                str(record.get("product_type", ""))[:100],
+                                str(record.get("proprietary_name", ""))[:500],
+                                str(record.get("non_proprietary_name", ""))[:500],
+                                str(record.get("labeler_name", ""))[:500],
+                                json.dumps(record),
+                                f.name,
+                                product_ndc[:50],
+                            )
+                        else:
+                            continue
+                        cursor.execute(sql, row)
+                        count += 1
+                        if count % 2000 == 0:
+                            print(f"  OpenFDA {endpoint_dir}: {count} records...", flush=True)
+                    except Exception as e:
+                        print(f"  Skip record in {f.name}: {e}")
+            except Exception as e:
+                print(f"  Skip {f.name}: {e}")
+    return count
+
+
+def load_rxnorm(cursor) -> int:
+    """Load RxNorm data from data/raw/rxnorm/."""
+    print(">>> Step 6/11: Loading RxNorm data...", flush=True)
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "rxnorm"
+    if not raw_dir.exists():
+        return 0
+    sql = """
+        INSERT INTO RAW.RXNORM_DRUGS (rxcui, name, tty, synonym, query_term, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM RAW.RXNORM_DRUGS 
+            WHERE rxcui=%s AND name=%s AND query_term=%s
+        )
+    """
+    batch = []
+    count = 0
+    for f in raw_dir.glob("*.json"):
+        try:
+            with open(f) as fp:
+                data = json.load(fp)
+            payload = data.get("data", {})
+            query = payload.get("query", "")
+            drugs = payload.get("drugs", [])
+            for drug in drugs:
+                rxcui = str(drug.get("rxcui", ""))
+                name = str(drug.get("name", drug.get("synonym", "")))
+                if not rxcui and not name:
+                    continue
+                try:
+                    batch.append((
+                        rxcui[:50],
+                        name[:500],
+                        str(drug.get("tty", ""))[:50],
+                        str(drug.get("synonym", ""))[:500],
+                        query[:200],
+                        json.dumps(drug),
+                        f.name,
+                        rxcui[:50],
+                        name[:500],
+                        query[:200],
+                    ))
+                    if len(batch) >= BATCH_SIZE:
+                        cursor.executemany(sql, batch)
+                        count += len(batch)
+                        batch = []
+                except Exception as e:
+                    print(f"  Skip drug {rxcui}: {e}")
+        except Exception as e:
+            print(f"  Skip {f.name}: {e}")
+    if batch:
+        cursor.executemany(sql, batch)
+        count += len(batch)
+    return count
+
+
+def load_who(cursor) -> int:
+    """Load WHO documents from data/raw/who/."""
+    print(">>> Step 7/11: Loading WHO documents...", flush=True)
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "who"
+    if not raw_dir.exists():
+        return 0
+    sql = """
+        INSERT INTO RAW.WHO_DOCUMENTS
+        (document_id, title, url, language, publication_date, document_type, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.WHO_DOCUMENTS WHERE document_id=%s)
+    """
+    batch = []
+    count = 0
+    for f in raw_dir.glob("*.json"):
+        try:
+            with open(f) as fp:
+                data = json.load(fp)
+            payload = data.get("data", {})
+            records = payload.get("records", [])
+            if not records:
+                records = payload.get("value", [])
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                doc_id = str(record.get("id", record.get("document_id", "")))
+                if not doc_id:
+                    doc_id = str(record.get("title", ""))[:200]
+                if not doc_id:
+                    continue
+                try:
+                    batch.append((
+                        doc_id[:200],
+                        str(record.get("title", record.get("name", "")))[:1000],
+                        str(record.get("url", record.get("link", "")))[:500],
+                        str(record.get("language", "en"))[:10],
+                        str(record.get("publication_date", record.get("date", "")))[:50],
+                        str(record.get("document_type", record.get("type", "")))[:100],
+                        json.dumps(record),
+                        f.name,
+                        doc_id[:200],
+                    ))
+                    if len(batch) >= BATCH_SIZE:
+                        cursor.executemany(sql, batch)
+                        count += len(batch)
+                        batch = []
+                except Exception as e:
+                    print(f"  Skip document {doc_id}: {e}")
+        except Exception as e:
+            print(f"  Skip {f.name}: {e}")
+    if batch:
+        cursor.executemany(sql, batch)
+        count += len(batch)
+    return count
+
+
+def load_ncbi_bookshelf(cursor) -> int:
+    """Load NCBI Bookshelf data from data/raw/ncbi_bookshelf/."""
+    print(">>> Step 8/11: Loading NCBI Bookshelf...", flush=True)
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "ncbi_bookshelf"
+    if not raw_dir.exists():
+        return 0
+    sql = """
+        INSERT INTO RAW.NCBI_BOOKSHELF
+        (uid, nbk_id, title, pubdate, abstract, url, query_term, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.NCBI_BOOKSHELF WHERE uid=%s)
+    """
+    batch = []
+    count = 0
+    for f in raw_dir.glob("*.json"):
+        try:
+            with open(f) as fp:
+                data = json.load(fp)
+            payload = data.get("data", {})
+            books = payload.get("books", [])
+            query_term = payload.get("query_term", "")
+            for book in books:
+                uid = str(book.get("uid", ""))
+                if not uid:
+                    continue
+                try:
+                    batch.append((
+                        uid[:50],
+                        str(book.get("nbk_id", ""))[:50],
+                        str(book.get("title", ""))[:1000],
+                        str(book.get("pubdate", ""))[:50],
+                        str(book.get("abstract", ""))[:100000],
+                        str(book.get("url", ""))[:500],
+                        query_term[:200],
+                        json.dumps(book),
+                        f.name,
+                        uid[:50],
+                    ))
+                    if len(batch) >= BATCH_SIZE:
+                        cursor.executemany(sql, batch)
+                        count += len(batch)
+                        batch = []
+                except Exception as e:
+                    print(f"  Skip book {uid}: {e}")
+        except Exception as e:
+            print(f"  Skip {f.name}: {e}")
+    if batch:
+        cursor.executemany(sql, batch)
+        count += len(batch)
+    return count
+
+
+def load_openstax(cursor) -> int:
+    """Load OpenStax books from data/raw/openstax/extracted/. Single-row inserts to avoid Snowflake 252001."""
+    print(">>> Step 9/11: Loading OpenStax books...", flush=True)
+    extracted_dir = PROJECT_ROOT / "data" / "raw" / "openstax" / "extracted"
+    if not extracted_dir.exists():
+        return 0
+    sql = """
+        INSERT INTO RAW.OPENSTAX_BOOKS
+        (book_slug, page_number, content, title, source_url, license, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM RAW.OPENSTAX_BOOKS 
+            WHERE book_slug=%s AND page_number=%s
+        )
+    """
+    count = 0
+    for f in extracted_dir.glob("*.json"):
+        try:
+            with open(f) as fp:
+                data = json.load(fp)
+            payload = data.get("data", {})
+            metadata = payload.get("metadata", {})
+            chapters = payload.get("chapters", [])
+            book_slug = metadata.get("book_slug", "")
+            title = metadata.get("title", "")
+            for chapter in chapters:
+                page_num = chapter.get("page", 0)
+                content = str(chapter.get("content", ""))
+                if not book_slug and not title:
+                    continue
+                try:
+                    row = (
+                        book_slug[:100],
+                        page_num,
+                        content[:100000],
+                        title[:500],
+                        metadata.get("source_url", "")[:500],
+                        metadata.get("license", "CC BY 4.0")[:50],
+                        json.dumps(chapter),
+                        f.name,
+                        book_slug[:100],
+                        page_num,
+                    )
+                    cursor.execute(sql, row)
+                    count += 1
+                    if count % 500 == 0:
+                        print(f"  OpenStax pages: {count}...", flush=True)
+                except Exception as e:
+                    print(f"  Skip page {page_num} in {book_slug}: {e}")
+        except Exception as e:
+            print(f"  Skip {f.name}: {e}")
+    return count
+
+
+def load_orphanet(cursor) -> int:
+    """Load Orphanet data from data/raw/orphanet/."""
+    print(">>> Step 10/11: Loading Orphanet data...", flush=True)
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "orphanet"
+    if not raw_dir.exists():
+        return 0
+    sql_phenotypes = """
+        INSERT INTO RAW.ORPHANET_PHENOTYPES
+        (phenotype_id, orpha_code, disease_name, hpo_id, phenotype_name, frequency, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.ORPHANET_PHENOTYPES WHERE phenotype_id=%s)
+    """
+    sql_diseases = """
+        INSERT INTO RAW.ORPHANET_DISEASES
+        (orpha_code, disease_name, definition, prevalence, inheritance, age_of_onset, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.ORPHANET_DISEASES WHERE orpha_code=%s)
+    """
+    sql_genes = """
+        INSERT INTO RAW.ORPHANET_GENES
+        (gene_id, gene_symbol, gene_name, orpha_code, disease_name, full_data, source_file)
+        SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.ORPHANET_GENES WHERE gene_id=%s)
+    """
+    count = 0
+    for dataset_dir in ["phenotypes", "diseases", "genes"]:
+        dataset_path = raw_dir / dataset_dir
+        if not dataset_path.exists():
+            continue
+        print(f"  Orphanet: loading {dataset_dir}...", flush=True)
+        batch = []
+        sql = sql_phenotypes if dataset_dir == "phenotypes" else (sql_diseases if dataset_dir == "diseases" else sql_genes)
+        for f in dataset_path.glob("*.json"):
+            try:
+                with open(f) as fp:
+                    data = json.load(fp)
+                payload = data.get("data", {})
+                if dataset_dir == "phenotypes":
+                    disorder_list = payload.get("DisorderList", {})
+                    if isinstance(disorder_list, dict):
+                        disorders = disorder_list.get("Disorder", [])
+                        if not isinstance(disorders, list):
+                            disorders = [disorders]
+                        for disorder in disorders:
+                            orpha = str(disorder.get("OrphaNumber", ""))
+                            disease_name = str(disorder.get("Name", ""))
+                            phenotype_list = disorder.get("HPODisorderAssociationList", {})
+                            if isinstance(phenotype_list, dict):
+                                hpo_list = phenotype_list.get("HPODisorderAssociation", [])
+                                if not isinstance(hpo_list, list):
+                                    hpo_list = [hpo_list]
+                                for idx, hpo in enumerate(hpo_list):
+                                    hpo_id = str(hpo.get("HPO", {}).get("HPOId", ""))
+                                    phenotype_name = str(hpo.get("HPO", {}).get("HPOTerm", ""))
+                                    freq = str(hpo.get("HPOFrequency", {}).get("Name", ""))
+                                    phenotype_id = f"{orpha}_{hpo_id}" if hpo_id else f"{orpha}_{idx}"
+                                    try:
+                                        batch.append((
+                                            phenotype_id[:50],
+                                            orpha[:20],
+                                            disease_name[:500],
+                                            hpo_id[:50],
+                                            phenotype_name[:500],
+                                            freq[:100],
+                                            json.dumps(hpo),
+                                            f.name,
+                                            phenotype_id[:50],
+                                        ))
+                                        if len(batch) >= BATCH_SIZE:
+                                            cursor.executemany(sql, batch)
+                                            count += len(batch)
+                                            batch = []
+                                    except Exception as e:
+                                        print(f"  Skip phenotype {phenotype_id}: {e}")
+                elif dataset_dir == "diseases":
+                    disorder_list = payload.get("DisorderList", {})
+                    if isinstance(disorder_list, dict):
+                        disorders = disorder_list.get("Disorder", [])
+                        if not isinstance(disorders, list):
+                            disorders = [disorders]
+                        for disorder in disorders:
+                            orpha = str(disorder.get("OrphaNumber", ""))
+                            if not orpha:
+                                continue
+                            try:
+                                batch.append((
+                                    orpha[:20],
+                                    str(disorder.get("Name", ""))[:500],
+                                    str(disorder.get("Definition", ""))[:10000],
+                                    str(disorder.get("PrevalenceList", {}).get("Prevalence", {}).get("PrevalenceClass", {}).get("Name", ""))[:200],
+                                    str(disorder.get("DisorderType", {}).get("Name", ""))[:200],
+                                    str(disorder.get("AverageAgeOfOnset", {}).get("Name", ""))[:200],
+                                    json.dumps(disorder),
+                                    f.name,
+                                    orpha[:20],
+                                ))
+                                if len(batch) >= BATCH_SIZE:
+                                    cursor.executemany(sql, batch)
+                                    count += len(batch)
+                                    batch = []
+                            except Exception as e:
+                                print(f"  Skip disease {orpha}: {e}")
+                elif dataset_dir == "genes":
+                    disorder_list = payload.get("DisorderList", {})
+                    if isinstance(disorder_list, dict):
+                        disorders = disorder_list.get("Disorder", [])
+                        if not isinstance(disorders, list):
+                            disorders = [disorders]
+                        for disorder in disorders:
+                            orpha = str(disorder.get("OrphaNumber", ""))
+                            disease_name = str(disorder.get("Name", ""))
+                            gene_list = disorder.get("DisorderGeneList", {})
+                            if isinstance(gene_list, dict):
+                                genes = gene_list.get("DisorderGeneAssociation", [])
+                                if not isinstance(genes, list):
+                                    genes = [genes]
+                                for gene_assoc in genes:
+                                    gene = gene_assoc.get("Gene", {})
+                                    gene_id = str(gene.get("Symbol", ""))
+                                    if not gene_id:
+                                        continue
+                                    try:
+                                        batch.append((
+                                            gene_id[:50],
+                                            gene_id[:100],
+                                            str(gene.get("Name", ""))[:500],
+                                            orpha[:20],
+                                            disease_name[:500],
+                                            json.dumps(gene_assoc),
+                                            f.name,
+                                            gene_id[:50],
+                                        ))
+                                        if len(batch) >= BATCH_SIZE:
+                                            cursor.executemany(sql, batch)
+                                            count += len(batch)
+                                            batch = []
+                                    except Exception as e:
+                                        print(f"  Skip gene {gene_id}: {e}")
+            except Exception as e:
+                print(f"  Skip {f.name}: {e}")
+        if batch:
+            cursor.executemany(sql, batch)
+            count += len(batch)
+    return count
+
+
 def load_rag_chunks(cursor) -> int:
     """Load RAG chunks from ChromaDB into Snowflake VECTORS.RAG_CHUNKS."""
+    print(">>> Step 11/11: Loading RAG chunks...", flush=True)
     try:
         import chromadb
     except ImportError:
@@ -182,6 +731,12 @@ def load_rag_chunks(cursor) -> int:
     if not data or not data["ids"]:
         return 0
 
+    sql = """
+        INSERT INTO VECTORS.RAG_CHUNKS (chunk_id, source, document_text, metadata, embedding)
+        SELECT %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s)::VECTOR(FLOAT, 384)
+        WHERE NOT EXISTS (SELECT 1 FROM VECTORS.RAG_CHUNKS WHERE chunk_id=%s)
+    """
+    batch = []
     count = 0
     for i, cid in enumerate(data["ids"]):
         doc = data["documents"][i] if data["documents"] else ""
@@ -192,17 +747,17 @@ def load_rag_chunks(cursor) -> int:
         try:
             meta_json = json.dumps(meta) if meta else "{}"
             emb_str = "[" + ",".join(str(float(x)) for x in emb) + "]"
-            cursor.execute(
-                """
-                INSERT INTO VECTORS.RAG_CHUNKS (chunk_id, source, document_text, metadata, embedding)
-                SELECT %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s)::VECTOR(FLOAT, 384)
-                WHERE NOT EXISTS (SELECT 1 FROM VECTORS.RAG_CHUNKS WHERE chunk_id=%s)
-                """,
-                (cid, meta.get("source", "unknown"), doc[:100000], meta_json, emb_str, cid),
-            )
-            count += 1
+            batch.append((cid, meta.get("source", "unknown"), doc[:100000], meta_json, emb_str, cid))
+            if len(batch) >= BATCH_SIZE:
+                cursor.executemany(sql, batch)
+                count += len(batch)
+                print(f"  RAG chunks: {count}...", flush=True)
+                batch = []
         except Exception as e:
             print(f"  Skip chunk {cid}: {e}")
+    if batch:
+        cursor.executemany(sql, batch)
+        count += len(batch)
     return count
 
 
@@ -214,37 +769,125 @@ def main():
     parser.add_argument("--symptoms", action="store_true", help="Load symptom index")
     parser.add_argument("--pubmed", action="store_true", help="Load PubMed articles")
     parser.add_argument("--pmc", action="store_true", help="Load PMC articles")
+    parser.add_argument("--openfda", action="store_true", help="Load OpenFDA data")
+    parser.add_argument("--rxnorm", action="store_true", help="Load RxNorm data")
+    parser.add_argument("--who", action="store_true", help="Load WHO documents")
+    parser.add_argument("--ncbi-bookshelf", action="store_true", dest="ncbi_bookshelf", help="Load NCBI Bookshelf data")
+    parser.add_argument("--openstax", action="store_true", help="Load OpenStax books")
+    parser.add_argument("--orphanet", action="store_true", help="Load Orphanet data")
     parser.add_argument("--rag", action="store_true", help="Load RAG chunks from ChromaDB")
     parser.add_argument("--all", action="store_true", help="Load everything")
+    parser.add_argument("--skip-loaded", action="store_true", help="Skip any step whose table(s) already have rows")
     args = parser.parse_args()
 
-    load_all = args.all or not any([args.manifests, args.symptoms, args.pubmed, args.pmc, args.rag])
+    load_all = args.all or not any([
+        args.manifests, args.symptoms, args.pubmed, args.pmc, args.openfda,
+        args.rxnorm, args.who, args.ncbi_bookshelf, args.openstax, args.orphanet, args.rag
+    ])
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    def should_skip(step_key: str) -> bool:
+        if not args.skip_loaded:
+            return False
+        for key, tables in SKIP_LOADED_CHECK:
+            if key == step_key:
+                loaded, total = _step_already_loaded(cursor, tables)
+                if loaded:
+                    print(f"  (Step already loaded: {total:,} rows in table(s), skipping)", flush=True)
+                return loaded
+        return False
 
     try:
         cursor.execute("USE WAREHOUSE MEDASSIST_WH")
         cursor.execute("USE DATABASE MEDASSIST_DB")
 
+        total_start = time.time()
+        if load_all:
+            print(f"Started at {time.strftime('%H:%M:%S')} — loading all sources (--skip-loaded=%s)." % args.skip_loaded, flush=True)
+
         if load_all or args.manifests:
-            n = load_manifests(cursor)
-            print(f"Loaded {n} manifests")
+            if should_skip("manifests"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_manifests(cursor)
+                print(f"Loaded {n} manifests ({time.time() - t0:.1f}s)", flush=True)
         if load_all or args.symptoms:
-            n = load_symptom_index(cursor)
-            print(f"Loaded {n} symptom-disease rows")
+            if should_skip("symptoms"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_symptom_index(cursor)
+                print(f"Loaded {n} symptom-disease rows ({time.time() - t0:.1f}s)", flush=True)
         if load_all or args.pubmed:
-            n = load_pubmed(cursor)
-            print(f"Loaded {n} PubMed articles")
+            if should_skip("pubmed"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_pubmed(cursor)
+                print(f"Loaded {n} PubMed articles ({time.time() - t0:.1f}s)", flush=True)
         if load_all or args.pmc:
-            n = load_pmc(cursor)
-            print(f"Loaded {n} PMC articles")
+            if should_skip("pmc"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_pmc(cursor)
+                print(f"Loaded {n} PMC articles ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.openfda:
+            if should_skip("openfda"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_openfda(cursor)
+                print(f"Loaded {n} OpenFDA records ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.rxnorm:
+            if should_skip("rxnorm"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_rxnorm(cursor)
+                print(f"Loaded {n} RxNorm drugs ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.who:
+            if should_skip("who"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_who(cursor)
+                print(f"Loaded {n} WHO documents ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.ncbi_bookshelf:
+            if should_skip("ncbi_bookshelf"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_ncbi_bookshelf(cursor)
+                print(f"Loaded {n} NCBI Bookshelf entries ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.openstax:
+            if should_skip("openstax"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_openstax(cursor)
+                print(f"Loaded {n} OpenStax pages ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.orphanet:
+            if should_skip("orphanet"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_orphanet(cursor)
+                print(f"Loaded {n} Orphanet records ({time.time() - t0:.1f}s)", flush=True)
         if load_all or args.rag:
-            n = load_rag_chunks(cursor)
-            print(f"Loaded {n} RAG chunks")
+            if should_skip("rag"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_rag_chunks(cursor)
+                print(f"Loaded {n} RAG chunks ({time.time() - t0:.1f}s)", flush=True)
 
         conn.commit()
-        print("Done.")
+        elapsed = time.time() - total_start
+        print(f"Done. Total time: {elapsed / 60:.1f} min ({elapsed:.0f}s)", flush=True)
     finally:
         cursor.close()
         conn.close()

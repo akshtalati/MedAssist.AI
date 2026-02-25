@@ -39,12 +39,21 @@ def get_snowflake_conn_params() -> dict[str, Any]:
 
 
 def get_connection():
-    """Return a Snowflake connection. Requires snowflake-connector-python."""
+    """Return a Snowflake connection. Requires snowflake-connector-python.
+    
+    Uses SNOWFLAKE_ROLE from .env (e.g. MEDASSIST_TEAM_ROLE or TRAINING_ROLE).
+    That role must have USAGE on schemas and INSERT/SELECT on the tables you load.
+    """
     import snowflake.connector
 
     params = get_snowflake_conn_params()
+    # Use role from env (e.g. MEDASSIST_TEAM_ROLE); fallback to TRAINING_ROLE
+    if not params.get("role"):
+        params["role"] = "TRAINING_ROLE"
+
     if "password" not in params and "authenticator" not in params:
         raise ValueError(
             "Set SNOWFLAKE_PASSWORD in .env, or SNOWFLAKE_AUTHENTICATOR=externalbrowser for MFA (opens browser)."
         )
+    
     return snowflake.connector.connect(**params)
