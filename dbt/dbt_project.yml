@@ -1,0 +1,24 @@
+name: 'medassist'
+version: '1.0.0'
+config-version: 2
+
+profile: 'medassist_snowflake'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+models:
+  medassist:
+    staging:
+      +materialized: view
+      +description: "Staging models - clean and normalize raw data"
+    intermediate:
+      +materialized: view
+      +description: "Intermediate models - join and transform staging data"
+    marts:
+      +materialized: table
+      +description: "Mart models - final business-ready datasets"
+
+vars:
+  warehouse: MEDASSIST_WH
+  database: MEDASSIST_DB

@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Raw data from various sources"
+    database: MEDASSIST_DB
+    schema: raw
+    tables:
+      - name: pubmed_articles
+      - name: pmc_articles
+      - name: openfda_labels
+      - name: openfda_events
+      - name: openfda_ndc
+      - name: rxnorm_drugs
+      - name: who_documents
+      - name: ncbi_bookshelf
+      - name: openstax_books
+      - name: orphanet_phenotypes
+      - name: orphanet_diseases
+      - name: orphanet_genes
+      - name: fetch_manifests
+
+  - name: normalized
+    description: "Normalized/processed data"
+    database: MEDASSIST_DB
+    schema: normalized
+    tables:
+      - name: symptom_disease_map
+      - name: diseases
