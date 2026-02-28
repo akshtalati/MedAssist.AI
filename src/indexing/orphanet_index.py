@@ -86,13 +86,21 @@ def build_symptom_index(
     """
     paths = get_data_paths()
     if orphanet_path is None:
-        raw_dir = paths["raw"] / "orphanet" / "phenotypes"
+        raw_dir = paths["raw"] / "orphanet"
         if not raw_dir.exists():
-            raise FileNotFoundError(f"Orphanet phenotypes dir not found: {raw_dir}")
-        files = sorted(raw_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not files:
-            raise FileNotFoundError(f"No Orphanet JSON in {raw_dir}")
-        orphanet_path = files[0]
+            raise FileNotFoundError(f"Orphanet raw dir not found: {raw_dir}")
+        orphanet_path = None
+        # Prefer phenotypes/ (legacy), then product4/ (current Orphadata)
+        for subdir in ("phenotypes", "product4"):
+            candidate = raw_dir / subdir
+            if not candidate.exists():
+                continue
+            files = sorted(candidate.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if files:
+                orphanet_path = files[0]
+                break
+        if orphanet_path is None:
+            raise FileNotFoundError(f"No Orphanet phenotypes JSON in {raw_dir}/phenotypes or {raw_dir}/product4")
 
     if output_path is None:
         paths["normalized"].mkdir(parents=True, exist_ok=True)
@@ -100,12 +108,12 @@ def build_symptom_index(
 
     with open(orphanet_path) as f:
         raw = json.load(f)
+    payload = raw.get("data", raw)
+    disorders = _extract_disorders(payload)
 
     # symptom_normalized -> [(orpha_code, disease_name, frequency, hpo_id), ...]
     index: dict[str, list[tuple[str, str, str, str]]] = {}
     disease_info: dict[str, dict] = {}  # orpha_code -> {name, symptoms[]}
-
-    disorders = _extract_disorders(raw)
     for disorder in disorders:
         orpha_code, disease_name, symptoms = _extract_disease_and_symptoms(disorder)
         if not orpha_code:

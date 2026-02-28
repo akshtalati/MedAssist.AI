@@ -6,6 +6,7 @@ Usage:
   python scripts/fetch_source.py pubmed --term "acute porphyria" --max_records 200
   python scripts/fetch_source.py openfda --endpoint label --max_records 1000
   python scripts/fetch_source.py orphanet --dataset phenotypes
+  python scripts/fetch_source.py orphanet --all-products
   python scripts/fetch_source.py rxnorm --query "ibuprofen"
   python scripts/fetch_source.py pmc --term "rare disease" --max_records 500
   python scripts/fetch_source.py who --endpoint documents --limit 50
@@ -50,7 +51,8 @@ def main():
     parser.add_argument("--max_records", type=int, help="Max records to fetch")
     parser.add_argument("--query", help="Query string (rxnorm)")
     parser.add_argument("--endpoint", help="Endpoint (openfda: label/event/ndc; who: documents/guidelines)")
-    parser.add_argument("--dataset", help="Dataset (orphanet: phenotypes/diseases/genes)")
+    parser.add_argument("--dataset", help="Dataset (orphanet: phenotypes/diseases/genes or product1-product7)")
+    parser.add_argument("--all-products", action="store_true", help="Orphanet: fetch all Orphadata products")
     parser.add_argument("--limit", type=int, help="Limit (who)")
     parser.add_argument("--search", help="OpenFDA search query")
     parser.add_argument("--book", help="Book slug (openstax: pharmacology, anatomy-physiology-2e, etc.)")
@@ -76,6 +78,11 @@ def main():
         kwargs["search"] = args.search
     if args.book is not None:
         kwargs["book"] = args.book
+
+    if args.source == "orphanet" and args.all_products:
+        for pid, p in fetcher.fetch_all_products():
+            print(f"  {pid}: {p or 'failed'}")
+        return 0
 
     path = fetcher.fetch(**kwargs)
     print(f"Fetched to: {path}")
