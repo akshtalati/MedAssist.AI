@@ -114,6 +114,31 @@ def _load_ncbi_bookshelf_chunks(paths: dict) -> Iterator[tuple[str, dict]]:
             continue
 
 
+def _load_orphanet_web_chunks(paths: dict) -> Iterator[tuple[str, dict]]:
+    """Yield (text, metadata) from Orpha.net web crawl (data/raw/orphanet/web/*.md)."""
+    web_dir = paths["raw"] / "orphanet" / "web"
+    if not web_dir.exists():
+        return
+    for md_path in sorted(web_dir.glob("*.md")):
+        if md_path.name.startswith("."):
+            continue
+        try:
+            content = md_path.read_text(encoding="utf-8")
+            if len(content) < 50:
+                continue
+            meta_path = web_dir / (md_path.stem + ".metadata.json")
+            orpha_code = md_path.stem
+            url = ""
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                orpha_code = str(meta.get("orpha_code", orpha_code))
+                url = str(meta.get("url", ""))[:500]
+            for chunk in _chunk_text(content):
+                yield chunk, {"source": "orphanet_web", "orpha_code": orpha_code, "url": url}
+        except (json.JSONDecodeError, OSError):
+            continue
+
+
 def build_rag_index(
     persist_dir: Path | None = None,
     model_name: str = "all-MiniLM-L6-v2",
@@ -158,6 +183,11 @@ def build_rag_index(
         if len(chunks) >= max_chunks:
             break
     for text, meta in _load_ncbi_bookshelf_chunks(paths):
+        chunks.append(text)
+        metadatas.append(meta)
+        if len(chunks) >= max_chunks:
+            break
+    for text, meta in _load_orphanet_web_chunks(paths):
         chunks.append(text)
         metadatas.append(meta)
         if len(chunks) >= max_chunks:

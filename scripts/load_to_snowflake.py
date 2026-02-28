@@ -42,6 +42,7 @@ SKIP_LOADED_CHECK = [
     ("ncbi_bookshelf", ["RAW.NCBI_BOOKSHELF"]),
     ("openstax", ["RAW.OPENSTAX_BOOKS"]),
     ("orphanet", ["RAW.ORPHANET_DISEASES", "RAW.ORPHANET_PHENOTYPES", "RAW.ORPHANET_GENES"]),
+    ("orphanet_web", ["RAW.ORPHANET_WEB_PAGES"]),
     ("rag", ["VECTORS.RAG_CHUNKS"]),
 ]
 
@@ -65,7 +66,7 @@ def _step_already_loaded(cursor, tables: list) -> tuple[bool, int]:
 
 def load_manifests(cursor) -> int:
     """Load fetch manifests from data/metadata/."""
-    print(">>> Step 1/11: Loading manifests...", flush=True)
+    print(">>> Step 1/12: Loading manifests...", flush=True)
     meta_dir = PROJECT_ROOT / "data" / "metadata"
     if not meta_dir.exists():
         return 0
@@ -106,7 +107,7 @@ def load_manifests(cursor) -> int:
 
 def load_symptom_index(cursor) -> int:
     """Load symptom→disease map from data/normalized/symptom_index.json."""
-    print(">>> Step 2/11: Loading symptom index...", flush=True)
+    print(">>> Step 2/12: Loading symptom index...", flush=True)
     path = PROJECT_ROOT / "data" / "normalized" / "symptom_index.json"
     if not path.exists():
         return 0
@@ -143,7 +144,7 @@ def load_symptom_index(cursor) -> int:
 
 def load_pubmed(cursor) -> int:
     """Load PubMed articles from data/raw/pubmed/. Uses single-row inserts to avoid Snowflake 252001."""
-    print(">>> Step 3/11: Loading PubMed articles...", flush=True)
+    print(">>> Step 3/12: Loading PubMed articles...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "pubmed"
     if not raw_dir.exists():
         return 0
@@ -185,7 +186,7 @@ def load_pubmed(cursor) -> int:
 
 def load_pmc(cursor) -> int:
     """Load PMC articles from data/raw/pmc/. Uses single-row inserts to avoid Snowflake 252001."""
-    print(">>> Step 4/11: Loading PMC articles...", flush=True)
+    print(">>> Step 4/12: Loading PMC articles...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "pmc"
     if not raw_dir.exists():
         return 0
@@ -227,7 +228,7 @@ def load_pmc(cursor) -> int:
 
 def load_openfda(cursor) -> int:
     """Load OpenFDA data from data/raw/openfda/{endpoint}/. Uses single-row inserts to avoid Snowflake 252001."""
-    print(">>> Step 5/11: Loading OpenFDA data...", flush=True)
+    print(">>> Step 5/12: Loading OpenFDA data...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "openfda"
     if not raw_dir.exists():
         return 0
@@ -347,7 +348,7 @@ def load_openfda(cursor) -> int:
 
 def load_rxnorm(cursor) -> int:
     """Load RxNorm data from data/raw/rxnorm/."""
-    print(">>> Step 6/11: Loading RxNorm data...", flush=True)
+    print(">>> Step 6/12: Loading RxNorm data...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "rxnorm"
     if not raw_dir.exists():
         return 0
@@ -402,7 +403,7 @@ def load_rxnorm(cursor) -> int:
 
 def load_who(cursor) -> int:
     """Load WHO documents from data/raw/who/."""
-    print(">>> Step 7/11: Loading WHO documents...", flush=True)
+    print(">>> Step 7/12: Loading WHO documents...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "who"
     if not raw_dir.exists():
         return 0
@@ -458,7 +459,7 @@ def load_who(cursor) -> int:
 
 def load_ncbi_bookshelf(cursor) -> int:
     """Load NCBI Bookshelf data from data/raw/ncbi_bookshelf/."""
-    print(">>> Step 8/11: Loading NCBI Bookshelf...", flush=True)
+    print(">>> Step 8/12: Loading NCBI Bookshelf...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "ncbi_bookshelf"
     if not raw_dir.exists():
         return 0
@@ -510,7 +511,7 @@ def load_ncbi_bookshelf(cursor) -> int:
 
 def load_openstax(cursor) -> int:
     """Load OpenStax books from data/raw/openstax/extracted/. Single-row inserts to avoid Snowflake 252001."""
-    print(">>> Step 9/11: Loading OpenStax books...", flush=True)
+    print(">>> Step 9/12: Loading OpenStax books...", flush=True)
     extracted_dir = PROJECT_ROOT / "data" / "raw" / "openstax" / "extracted"
     if not extracted_dir.exists():
         return 0
@@ -563,8 +564,8 @@ def load_openstax(cursor) -> int:
 
 
 def load_orphanet(cursor) -> int:
-    """Load Orphanet data from data/raw/orphanet/."""
-    print(">>> Step 10/11: Loading Orphanet data...", flush=True)
+    """Load Orphanet data from data/raw/orphanet/ (product1=genes, product4=phenotypes, product6=diseases)."""
+    print(">>> Step 10/12: Loading Orphanet data...", flush=True)
     raw_dir = PROJECT_ROOT / "data" / "raw" / "orphanet"
     if not raw_dir.exists():
         return 0
@@ -587,130 +588,204 @@ def load_orphanet(cursor) -> int:
         WHERE NOT EXISTS (SELECT 1 FROM RAW.ORPHANET_GENES WHERE gene_id=%s)
     """
     count = 0
-    for dataset_dir in ["phenotypes", "diseases", "genes"]:
-        dataset_path = raw_dir / dataset_dir
-        if not dataset_path.exists():
+
+    # Map dataset -> (subdirs to try, sql, handler)
+    def _phenotype_rows(payload, fname):
+        rows = []
+        # Product4: HPODisorderSetStatusList.HPODisorderSetStatus[].Disorder
+        hpo_list = payload.get("HPODisorderSetStatusList", {})
+        statuses = hpo_list.get("HPODisorderSetStatus", [])
+        if not isinstance(statuses, list):
+            statuses = [statuses] if statuses else []
+        for status in statuses:
+            disorder = status.get("Disorder", {}) if isinstance(status, dict) else {}
+            orpha = str(disorder.get("OrphaCode", disorder.get("OrphaNumber", "")))
+            disease_name = str(disorder.get("Name", ""))
+            assoc_list = disorder.get("HPODisorderAssociationList", {})
+            if isinstance(assoc_list, dict):
+                hpo_assoc = assoc_list.get("HPODisorderAssociation", [])
+                if not isinstance(hpo_assoc, list):
+                    hpo_assoc = [hpo_assoc] if hpo_assoc else []
+                for idx, hpo in enumerate(hpo_assoc):
+                    hpo_obj = hpo.get("HPO", {}) if isinstance(hpo, dict) else {}
+                    freq_obj = hpo.get("HPOFrequency", {}) if isinstance(hpo, dict) else {}
+                    hpo_id = str(hpo_obj.get("HPOId", ""))
+                    phenotype_name = str(hpo_obj.get("HPOTerm", ""))
+                    freq = str(freq_obj.get("Name", ""))
+                    phenotype_id = f"{orpha}_{hpo_id}" if hpo_id else f"{orpha}_{idx}"
+                    rows.append((phenotype_id[:50], orpha[:20], disease_name[:500], hpo_id[:50], phenotype_name[:500], freq[:100], json.dumps(hpo), fname, phenotype_id[:50]))
+        # Legacy: DisorderList.Disorder[].HPODisorderAssociationList
+        if not rows:
+            disorder_list = payload.get("DisorderList", {})
+            if isinstance(disorder_list, dict):
+                disorders = disorder_list.get("Disorder", [])
+                if not isinstance(disorders, list):
+                    disorders = [disorders]
+                for disorder in disorders:
+                    orpha = str(disorder.get("OrphaNumber", disorder.get("OrphaCode", "")))
+                    disease_name = str(disorder.get("Name", ""))
+                    phenotype_list = disorder.get("HPODisorderAssociationList", {})
+                    if isinstance(phenotype_list, dict):
+                        hpo_list = phenotype_list.get("HPODisorderAssociation", [])
+                        if not isinstance(hpo_list, list):
+                            hpo_list = [hpo_list]
+                        for idx, hpo in enumerate(hpo_list):
+                            hpo_id = str(hpo.get("HPO", {}).get("HPOId", ""))
+                            phenotype_name = str(hpo.get("HPO", {}).get("HPOTerm", ""))
+                            freq = str(hpo.get("HPOFrequency", {}).get("Name", ""))
+                            phenotype_id = f"{orpha}_{hpo_id}" if hpo_id else f"{orpha}_{idx}"
+                            rows.append((phenotype_id[:50], orpha[:20], disease_name[:500], hpo_id[:50], phenotype_name[:500], freq[:100], json.dumps(hpo), fname, phenotype_id[:50]))
+        return rows
+
+    def _disease_rows(payload, fname):
+        rows = []
+        disorder_list = payload.get("DisorderList", {})
+        if not isinstance(disorder_list, dict):
+            return rows
+        disorders = disorder_list.get("Disorder", [])
+        if not isinstance(disorders, list):
+            disorders = [disorders]
+        for disorder in disorders:
+            orpha = str(disorder.get("OrphaNumber", disorder.get("OrphaCode", "")))
+            if not orpha:
+                continue
+            prev = disorder.get("PrevalenceList", {}) or {}
+            prev = prev.get("Prevalence", {}) if isinstance(prev, dict) else {}
+            prev = prev.get("PrevalenceClass", {}) if isinstance(prev, dict) else {}
+            prev_name = prev.get("Name", "") if isinstance(prev, dict) else ""
+            rows.append((
+                orpha[:20],
+                str(disorder.get("Name", ""))[:500],
+                str(disorder.get("Definition", ""))[:10000],
+                str(prev_name)[:200],
+                str((disorder.get("DisorderType") or {}).get("Name", ""))[:200],
+                str((disorder.get("AverageAgeOfOnset") or {}).get("Name", ""))[:200],
+                json.dumps(disorder),
+                fname,
+                orpha[:20],
+            ))
+        return rows
+
+    def _gene_rows(payload, fname):
+        rows = []
+        disorder_list = payload.get("DisorderList", {})
+        if not isinstance(disorder_list, dict):
+            return rows
+        disorders = disorder_list.get("Disorder", [])
+        if not isinstance(disorders, list):
+            disorders = [disorders]
+        for disorder in disorders:
+            orpha = str(disorder.get("OrphaNumber", disorder.get("OrphaCode", "")))
+            disease_name = str(disorder.get("Name", ""))
+            gene_list = disorder.get("DisorderGeneList", {})
+            if not isinstance(gene_list, dict):
+                continue
+            genes = gene_list.get("DisorderGeneAssociation", [])
+            if not isinstance(genes, list):
+                genes = [genes]
+            for gene_assoc in genes:
+                gene = gene_assoc.get("Gene", {}) if isinstance(gene_assoc, dict) else {}
+                gene_id = str(gene.get("Symbol", ""))
+                if not gene_id:
+                    continue
+                rows.append((
+                    gene_id[:50],
+                    gene_id[:100],
+                    str(gene.get("Name", ""))[:500],
+                    orpha[:20],
+                    disease_name[:500],
+                    json.dumps(gene_assoc),
+                    fname,
+                    gene_id[:50],
+                ))
+        return rows
+
+    # Subdirs to try per dataset: legacy name first, then product dir
+    dataset_config = [
+        ("phenotypes", ["phenotypes", "product4"], sql_phenotypes, _phenotype_rows),
+        ("diseases", ["diseases", "product6"], sql_diseases, _disease_rows),
+        ("genes", ["genes", "product1"], sql_genes, _gene_rows),
+    ]
+    for dataset_name, subdirs, sql, row_fn in dataset_config:
+        for subdir in subdirs:
+            dataset_path = raw_dir / subdir
+            if not dataset_path.exists():
+                continue
+            print(f"  Orphanet: loading {dataset_name} from {subdir}...", flush=True)
+            batch = []
+            for f in sorted(dataset_path.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    with open(f) as fp:
+                        data = json.load(fp)
+                    payload = data.get("data", data)
+                    if not isinstance(payload, dict):
+                        continue
+                    for row in row_fn(payload, f.name):
+                        batch.append(row)
+                        if len(batch) >= BATCH_SIZE:
+                            cursor.executemany(sql, batch)
+                            count += len(batch)
+                            print(f"  Orphanet {dataset_name}: {count}...", flush=True)
+                            batch = []
+                except Exception as e:
+                    print(f"  Skip {f.name}: {e}")
+            if batch:
+                cursor.executemany(sql, batch)
+                count += len(batch)
+            break  # one subdir per dataset is enough
+    return count
+
+
+def load_orphanet_web(cursor) -> int:
+    """Load Orpha.net web crawl from data/raw/orphanet/web/ (.md + .metadata.json)."""
+    print(">>> Step 10b/12: Loading Orphanet web pages...", flush=True)
+    web_dir = PROJECT_ROOT / "data" / "raw" / "orphanet" / "web"
+    if not web_dir.exists():
+        return 0
+    sql = """
+        INSERT INTO RAW.ORPHANET_WEB_PAGES
+        (orpha_code, url, title, content, fetched_at, source_file)
+        SELECT %s, %s, %s, %s, %s, %s
+        WHERE NOT EXISTS (SELECT 1 FROM RAW.ORPHANET_WEB_PAGES WHERE orpha_code=%s)
+    """
+    count = 0
+    # Iterate .md files; pair with .metadata.json when present
+    for md_path in sorted(web_dir.glob("*.md")):
+        if md_path.name.startswith("."):
             continue
-        print(f"  Orphanet: loading {dataset_dir}...", flush=True)
-        batch = []
-        sql = sql_phenotypes if dataset_dir == "phenotypes" else (sql_diseases if dataset_dir == "diseases" else sql_genes)
-        for f in dataset_path.glob("*.json"):
-            try:
-                with open(f) as fp:
-                    data = json.load(fp)
-                payload = data.get("data", {})
-                if dataset_dir == "phenotypes":
-                    disorder_list = payload.get("DisorderList", {})
-                    if isinstance(disorder_list, dict):
-                        disorders = disorder_list.get("Disorder", [])
-                        if not isinstance(disorders, list):
-                            disorders = [disorders]
-                        for disorder in disorders:
-                            orpha = str(disorder.get("OrphaNumber", ""))
-                            disease_name = str(disorder.get("Name", ""))
-                            phenotype_list = disorder.get("HPODisorderAssociationList", {})
-                            if isinstance(phenotype_list, dict):
-                                hpo_list = phenotype_list.get("HPODisorderAssociation", [])
-                                if not isinstance(hpo_list, list):
-                                    hpo_list = [hpo_list]
-                                for idx, hpo in enumerate(hpo_list):
-                                    hpo_id = str(hpo.get("HPO", {}).get("HPOId", ""))
-                                    phenotype_name = str(hpo.get("HPO", {}).get("HPOTerm", ""))
-                                    freq = str(hpo.get("HPOFrequency", {}).get("Name", ""))
-                                    phenotype_id = f"{orpha}_{hpo_id}" if hpo_id else f"{orpha}_{idx}"
-                                    try:
-                                        batch.append((
-                                            phenotype_id[:50],
-                                            orpha[:20],
-                                            disease_name[:500],
-                                            hpo_id[:50],
-                                            phenotype_name[:500],
-                                            freq[:100],
-                                            json.dumps(hpo),
-                                            f.name,
-                                            phenotype_id[:50],
-                                        ))
-                                        if len(batch) >= BATCH_SIZE:
-                                            cursor.executemany(sql, batch)
-                                            count += len(batch)
-                                            batch = []
-                                    except Exception as e:
-                                        print(f"  Skip phenotype {phenotype_id}: {e}")
-                elif dataset_dir == "diseases":
-                    disorder_list = payload.get("DisorderList", {})
-                    if isinstance(disorder_list, dict):
-                        disorders = disorder_list.get("Disorder", [])
-                        if not isinstance(disorders, list):
-                            disorders = [disorders]
-                        for disorder in disorders:
-                            orpha = str(disorder.get("OrphaNumber", ""))
-                            if not orpha:
-                                continue
-                            try:
-                                batch.append((
-                                    orpha[:20],
-                                    str(disorder.get("Name", ""))[:500],
-                                    str(disorder.get("Definition", ""))[:10000],
-                                    str(disorder.get("PrevalenceList", {}).get("Prevalence", {}).get("PrevalenceClass", {}).get("Name", ""))[:200],
-                                    str(disorder.get("DisorderType", {}).get("Name", ""))[:200],
-                                    str(disorder.get("AverageAgeOfOnset", {}).get("Name", ""))[:200],
-                                    json.dumps(disorder),
-                                    f.name,
-                                    orpha[:20],
-                                ))
-                                if len(batch) >= BATCH_SIZE:
-                                    cursor.executemany(sql, batch)
-                                    count += len(batch)
-                                    batch = []
-                            except Exception as e:
-                                print(f"  Skip disease {orpha}: {e}")
-                elif dataset_dir == "genes":
-                    disorder_list = payload.get("DisorderList", {})
-                    if isinstance(disorder_list, dict):
-                        disorders = disorder_list.get("Disorder", [])
-                        if not isinstance(disorders, list):
-                            disorders = [disorders]
-                        for disorder in disorders:
-                            orpha = str(disorder.get("OrphaNumber", ""))
-                            disease_name = str(disorder.get("Name", ""))
-                            gene_list = disorder.get("DisorderGeneList", {})
-                            if isinstance(gene_list, dict):
-                                genes = gene_list.get("DisorderGeneAssociation", [])
-                                if not isinstance(genes, list):
-                                    genes = [genes]
-                                for gene_assoc in genes:
-                                    gene = gene_assoc.get("Gene", {})
-                                    gene_id = str(gene.get("Symbol", ""))
-                                    if not gene_id:
-                                        continue
-                                    try:
-                                        batch.append((
-                                            gene_id[:50],
-                                            gene_id[:100],
-                                            str(gene.get("Name", ""))[:500],
-                                            orpha[:20],
-                                            disease_name[:500],
-                                            json.dumps(gene_assoc),
-                                            f.name,
-                                            gene_id[:50],
-                                        ))
-                                        if len(batch) >= BATCH_SIZE:
-                                            cursor.executemany(sql, batch)
-                                            count += len(batch)
-                                            batch = []
-                                    except Exception as e:
-                                        print(f"  Skip gene {gene_id}: {e}")
-            except Exception as e:
-                print(f"  Skip {f.name}: {e}")
-        if batch:
-            cursor.executemany(sql, batch)
-            count += len(batch)
+        meta_path = web_dir / (md_path.stem + ".metadata.json")
+        try:
+            content = md_path.read_text(encoding="utf-8")
+            url = ""
+            orpha_code = md_path.stem
+            fetched_at = ""
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                url = str(meta.get("url", ""))[:500]
+                orpha_code = str(meta.get("orpha_code", orpha_code))[:20]
+                fetched_at = str(meta.get("fetched_at", ""))[:50]
+            # Optional: try .json for title (crawl --format json)
+            json_path = web_dir / (md_path.stem + ".json")
+            title = ""
+            if json_path.exists():
+                try:
+                    doc = json.loads(json_path.read_text(encoding="utf-8"))
+                    title = str(doc.get("title", ""))[:1000]
+                except Exception:
+                    pass
+            row = (orpha_code[:20], url, title[:1000], content[:1000000], fetched_at, md_path.name, orpha_code[:20])
+            cursor.execute(sql, row)
+            count += 1
+            if count % 500 == 0:
+                print(f"  Orphanet web: {count} pages...", flush=True)
+        except Exception as e:
+            print(f"  Skip {md_path.name}: {e}")
     return count
 
 
 def load_rag_chunks(cursor) -> int:
     """Load RAG chunks from ChromaDB into Snowflake VECTORS.RAG_CHUNKS."""
-    print(">>> Step 11/11: Loading RAG chunks...", flush=True)
+    print(">>> Step 11/12: Loading RAG chunks...", flush=True)
     try:
         import chromadb
     except ImportError:
@@ -775,6 +850,7 @@ def main():
     parser.add_argument("--ncbi-bookshelf", action="store_true", dest="ncbi_bookshelf", help="Load NCBI Bookshelf data")
     parser.add_argument("--openstax", action="store_true", help="Load OpenStax books")
     parser.add_argument("--orphanet", action="store_true", help="Load Orphanet data")
+    parser.add_argument("--orphanet-web", action="store_true", dest="orphanet_web", help="Load Orphanet web crawl (orpha.net pages)")
     parser.add_argument("--rag", action="store_true", help="Load RAG chunks from ChromaDB")
     parser.add_argument("--all", action="store_true", help="Load everything")
     parser.add_argument("--skip-loaded", action="store_true", help="Skip any step whose table(s) already have rows")
@@ -782,7 +858,7 @@ def main():
 
     load_all = args.all or not any([
         args.manifests, args.symptoms, args.pubmed, args.pmc, args.openfda,
-        args.rxnorm, args.who, args.ncbi_bookshelf, args.openstax, args.orphanet, args.rag
+        args.rxnorm, args.who, args.ncbi_bookshelf, args.openstax, args.orphanet, args.orphanet_web, args.rag
     ])
 
     conn = get_connection()
@@ -877,6 +953,13 @@ def main():
                 t0 = time.time()
                 n = load_orphanet(cursor)
                 print(f"Loaded {n} Orphanet records ({time.time() - t0:.1f}s)", flush=True)
+        if load_all or args.orphanet_web:
+            if should_skip("orphanet_web"):
+                pass
+            else:
+                t0 = time.time()
+                n = load_orphanet_web(cursor)
+                print(f"Loaded {n} Orphanet web pages ({time.time() - t0:.1f}s)", flush=True)
         if load_all or args.rag:
             if should_skip("rag"):
                 pass
