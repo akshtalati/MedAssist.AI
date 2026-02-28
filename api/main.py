@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -28,31 +30,51 @@ if not VERTEX_AI_DATASTORE_PATH and os.environ.get("VERTEX_AI_DATASTORE_ID"):
 
 app = FastAPI(title="MedAssist.AI API")
 
+# Frontend: serve static UI at /
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+@app.get("/")
+def index():
+    """Serve the MedAssist.AI web UI."""
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Static frontend not found")
+    return FileResponse(index_path)
+
 
 class Question(BaseModel):
     question: str
+    brief: bool = False  # if True, use short answer + references only
 
 
 def fetch_all_literature_context(question: str, limit: int = 30) -> str:
     """
     Search PubMed, PMC, NCBI Bookshelf, and OpenStax in one go (all sources at once).
-    Returns combined context for the LLM.
+    Returns combined context for the LLM, including article URLs for references.
     """
     conn = get_connection()
     cur = conn.cursor()
     like = f"%{question}%"
     try:
-        # Single query: union all four literature sources, then filter by search term
+        # Union all four sources; include URL/link for each row so the model can cite them
         sql = """
-            SELECT source, title, abstract
+            SELECT source, title, abstract, url
             FROM (
-                SELECT 'pubmed' AS source, title, abstract FROM RAW.PUBMED_ARTICLES
+                SELECT 'pubmed' AS source, title, abstract,
+                    'https://pubmed.ncbi.nlm.nih.gov/' || CAST(pmid AS VARCHAR) || '/' AS url
+                FROM RAW.PUBMED_ARTICLES
                 UNION ALL
-                SELECT 'pmc', title, abstract FROM RAW.PMC_ARTICLES
+                SELECT 'pmc', title, abstract,
+                    CASE WHEN pmcid LIKE 'PMC%%' THEN 'https://www.ncbi.nlm.nih.gov/pmc/articles/' || pmcid || '/'
+                         ELSE 'https://www.ncbi.nlm.nih.gov/pmc/articles/PMC' || pmcid || '/' END AS url
+                FROM RAW.PMC_ARTICLES
                 UNION ALL
-                SELECT 'ncbi_bookshelf', title, abstract FROM RAW.NCBI_BOOKSHELF
+                SELECT 'ncbi_bookshelf', title, abstract, COALESCE(url, '') AS url
+                FROM RAW.NCBI_BOOKSHELF
                 UNION ALL
-                SELECT 'openstax', title, content AS abstract FROM RAW.OPENSTAX_BOOKS
+                SELECT 'openstax', title, content AS abstract, COALESCE(source_url, '') AS url
+                FROM RAW.OPENSTAX_BOOKS
             ) unified
             WHERE (title ILIKE %s OR abstract ILIKE %s)
             LIMIT %s
@@ -67,11 +89,17 @@ def fetch_all_literature_context(question: str, limit: int = 30) -> str:
         return "No matching articles were found across PubMed, PMC, NCBI Bookshelf, or OpenStax."
 
     parts: list[str] = []
-    for idx, (source, title, abstract) in enumerate(rows, start=1):
+    for idx, (source, title, abstract, url) in enumerate(rows, start=1):
         text = (abstract or "")[:8000]  # cap length per doc to avoid token overflow
-        parts.append(
-            f"[{idx}] Source: {source}\nTitle: {title}\nText: {text}\n"
-        )
+        url_str = (url or "").strip()
+        if url_str:
+            parts.append(
+                f"[{idx}] Source: {source}\nTitle: {title}\nURL: {url_str}\nText: {text}\n"
+            )
+        else:
+            parts.append(
+                f"[{idx}] Source: {source}\nTitle: {title}\nText: {text}\n"
+            )
     return "\n---\n\n".join(parts)
 
 
@@ -146,6 +174,63 @@ def fetch_pubmed_context(question: str, limit: int = 20) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+# Snowflake Cortex model for /ask-both
+CORTEX_MODEL = "claude-sonnet-4-6"
+
+
+def cortex_complete(prompt: str) -> str:
+    """Call Snowflake CORTEX.COMPLETE with the given prompt. Returns the model response text."""
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, %s) AS response",
+            (CORTEX_MODEL, prompt),
+        )
+        row = cur.fetchone()
+        return (row[0] or "").strip() if row else ""
+    except Exception as e:
+        return f"[Cortex error: {e}]"
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _build_medassist_prompt(question: str, context: str) -> str:
+    """Shared prompt for Gemini and Cortex (same context, same structure)."""
+    return (
+        "You are MedAssist.AI, a medical assistant for clinicians.\n\n"
+        "Use the context below (from PubMed, PMC, NCBI Bookshelf, OpenStax, and Orphanet symptom–disease data) "
+        "as your PRIMARY evidence to answer the question. If the context is incomplete, you may carefully supplement "
+        "with general medical knowledge, and you MUST say when you are going beyond the provided context.\n\n"
+        "Keep each section concise; avoid long paragraphs where bullets suffice.\n\n"
+        "IMPORTANT: You MUST write a COMPLETE answer. Do not stop mid-sentence. Write every section fully. "
+        "If no rare diseases appear in the context, say 'None identified in the provided context' in that section.\n\n"
+        "Respond in **Markdown** using EXACTLY these sections:\n"
+        "1. **Summary** – 2–3 sentence overview.\n"
+        "2. **Common Differential Diagnosis** – bullet list of common conditions (at least 5 items).\n"
+        "3. **Rare Diseases (from Orphanet)** – bullet list; mark items that came from the Orphanet data (at least 3 if present in context).\n"
+        "4. **Red-Flag Features** – bullet list of findings that require urgent action (at least 4 items).\n"
+        "5. **Suggested Next Steps** – bullet list of investigations / management steps (at least 4 items).\n"
+        "6. **References** – list 3–5 key sources as markdown links in the form [Title](URL), using only URLs provided in the context.\n\n"
+        f"Question:\n{question}\n\n"
+        f"Context:\n{context}\n"
+    )
+
+
+def _build_medassist_prompt_brief(question: str, context: str) -> str:
+    """Shorter prompt for brief mode: bullets + references only."""
+    return (
+        "You are MedAssist.AI, a medical assistant for clinicians.\n\n"
+        "Use the context below as your PRIMARY evidence. Give a very concise answer.\n\n"
+        "Respond in **Markdown** with:\n"
+        "1. **Summary** – 3–5 bullet points (one line each). No long paragraphs.\n"
+        "2. **References** – list 3–5 key sources as markdown links [Title](URL), using only URLs from the context.\n\n"
+        f"Question:\n{question}\n\n"
+        f"Context:\n{context}\n"
+    )
+
+
 @app.post("/ask")
 def ask(question: Question):
     """
@@ -162,19 +247,9 @@ def ask(question: Question):
         context = context + "\n\n" + symptom_block
 
     prompt = (
-        "You are MedAssist.AI, a medical assistant for clinicians.\n\n"
-        "Use the context below (from PubMed, PMC, NCBI Bookshelf, OpenStax, and Orphanet symptom–disease data) "
-        "as your PRIMARY evidence to answer the question. If the context is incomplete, you may carefully supplement "
-        "with general medical knowledge, and you MUST say when you are going beyond the provided context.\n\n"
-        "IMPORTANT: You MUST write a COMPLETE answer. Do not stop mid-sentence. Write every section fully.\n\n"
-        "Respond in **Markdown** using EXACTLY these sections:\n"
-        "1. **Summary** – 2–3 sentence overview.\n"
-        "2. **Common Differential Diagnosis** – bullet list of common conditions (at least 5 items).\n"
-        "3. **Rare Diseases (from Orphanet)** – bullet list; mark items that came from the Orphanet data (at least 3 if present in context).\n"
-        "4. **Red-Flag Features** – bullet list of findings that require urgent action (at least 4 items).\n"
-        "5. **Suggested Next Steps** – bullet list of investigations / management steps (at least 4 items).\n\n"
-        f"Question:\n{question.question}\n\n"
-        f"Context:\n{context}\n"
+        _build_medassist_prompt_brief(question.question, context)
+        if question.brief
+        else _build_medassist_prompt(question.question, context)
     )
 
     contents = [
@@ -212,6 +287,59 @@ def ask(question: Question):
         answer = getattr(response, "text", None) or ""
     answer = answer.strip()
     return {"answer": answer}
+
+
+@app.post("/ask-both")
+def ask_both(question: Question):
+    """
+    Return two answers for the same question: one from Gemini (Vertex AI) and one from
+    Snowflake Cortex (claude-sonnet-4-6), both using the same Snowflake context.
+    """
+    literature = fetch_all_literature_context(question.question, limit=30)
+    symptom_block = fetch_symptom_disease_context(question.question, limit=50)
+    context = literature + ("\n\n" + symptom_block if symptom_block else "")
+
+    prompt = (
+        _build_medassist_prompt_brief(question.question, context)
+        if question.brief
+        else _build_medassist_prompt(question.question, context)
+    )
+
+    # 1) Gemini
+    contents = [
+        types.Content(role="user", parts=[types.Part.from_text(text=prompt)]),
+    ]
+    config = types.GenerateContentConfig(
+        temperature=0.3,
+        top_p=0.9,
+        max_output_tokens=4096,
+    )
+    response = client.models.generate_content(
+        model=MODEL_ID,
+        contents=contents,
+        config=config,
+    )
+    answer_gemini = ""
+    try:
+        if response.candidates:
+            c = response.candidates[0]
+            if getattr(c, "content", None) and getattr(c.content, "parts", None):
+                for p in c.content.parts:
+                    if hasattr(p, "text") and p.text:
+                        answer_gemini += p.text
+    except Exception:
+        pass
+    if not answer_gemini:
+        answer_gemini = getattr(response, "text", None) or ""
+    answer_gemini = answer_gemini.strip()
+
+    # 2) Cortex
+    answer_cortex = cortex_complete(prompt)
+
+    return {
+        "answer_gemini": answer_gemini,
+        "answer_cortex": answer_cortex,
+    }
 
 
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----
