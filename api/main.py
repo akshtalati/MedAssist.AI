@@ -9,6 +9,14 @@ from google.genai import types
 
 from src.snowflake_client import get_connection
 
+# RAG (ChromaDB) - optional; falls back to ILIKE if unavailable
+try:
+    from src.indexing.rag_index import query_rag
+    _RAG_AVAILABLE = True
+except ImportError:
+    _RAG_AVAILABLE = False
+    query_rag = None
+
 
 # Configure Vertex AI client (uses gcloud ADC, no API key)
 client = genai.Client(
@@ -101,6 +109,143 @@ def fetch_all_literature_context(question: str, limit: int = 30) -> str:
                 f"[{idx}] Source: {source}\nTitle: {title}\nText: {text}\n"
             )
     return "\n---\n\n".join(parts)
+
+
+def _fetch_rag_entries(question: str, limit: int = 15) -> list[dict]:
+    """
+    Semantic search over local ChromaDB RAG index.
+    Returns list of {source, title, url, text}. Empty list if RAG unavailable or no results.
+    """
+    if not _RAG_AVAILABLE or query_rag is None:
+        return []
+    try:
+        results = query_rag(question, n_results=limit)
+    except Exception:
+        return []
+    if not results:
+        return []
+
+    entries = []
+    for r in results:
+        doc = r.get("document", "")
+        meta = r.get("metadata", {})
+        source = meta.get("source", "unknown")
+        title = (meta.get("title") or meta.get("url") or "")[:500]
+        url = meta.get("url", "")
+        if source == "pubmed" and meta.get("pmid"):
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{meta['pmid']}/"
+        elif source == "pmc" and meta.get("pmcid"):
+            pmcid = str(meta["pmcid"])
+            url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/" if pmcid.startswith("PMC") else f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmcid}/"
+        text = (doc or "")[:8000]
+        entries.append({"source": source, "title": title, "url": url, "text": text})
+    return entries
+
+
+def _fetch_ilike_entries(question: str, limit: int = 30) -> list[dict]:
+    """
+    Keyword search over Snowflake (PubMed, PMC, NCBI Bookshelf, OpenStax).
+    Returns list of {source, title, url, text}.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    like = f"%{question}%"
+    try:
+        sql = """
+            SELECT source, title, abstract, url
+            FROM (
+                SELECT 'pubmed' AS source, title, abstract,
+                    'https://pubmed.ncbi.nlm.nih.gov/' || CAST(pmid AS VARCHAR) || '/' AS url
+                FROM RAW.PUBMED_ARTICLES
+                UNION ALL
+                SELECT 'pmc', title, abstract,
+                    CASE WHEN pmcid LIKE 'PMC%%' THEN 'https://www.ncbi.nlm.nih.gov/pmc/articles/' || pmcid || '/'
+                         ELSE 'https://www.ncbi.nlm.nih.gov/pmc/articles/PMC' || pmcid || '/' END AS url
+                FROM RAW.PMC_ARTICLES
+                UNION ALL
+                SELECT 'ncbi_bookshelf', title, abstract, COALESCE(url, '') AS url
+                FROM RAW.NCBI_BOOKSHELF
+                UNION ALL
+                SELECT 'openstax', title, content AS abstract, COALESCE(source_url, '') AS url
+                FROM RAW.OPENSTAX_BOOKS
+            ) unified
+            WHERE (title ILIKE %s OR abstract ILIKE %s)
+            LIMIT %s
+        """
+        cur.execute(sql, (like, like, limit))
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    entries = []
+    for source, title, abstract, url in (rows or []):
+        text = (abstract or "")[:8000]
+        url_str = (url or "").strip()
+        entries.append({"source": source, "title": title, "url": url_str, "text": text})
+    return entries
+
+
+def _merge_and_dedupe_literature(rag_entries: list[dict], ilike_entries: list[dict]) -> list[dict]:
+    """
+    Merge RAG (semantic) and ILIKE (keyword) results, deduplicating by URL or (source, title).
+    RAG results come first; ILIKE fills in gaps.
+    """
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict] = []
+
+    def key(e: dict) -> tuple:
+        url = (e.get("url") or "").strip()
+        if url:
+            return ("url", url)
+        return ("title", (e.get("source") or ""), (e.get("title") or "")[:200])
+
+    for e in rag_entries:
+        k = key(e)
+        if k not in seen:
+            seen.add(k)
+            merged.append(e)
+
+    for e in ilike_entries:
+        k = key(e)
+        if k not in seen:
+            seen.add(k)
+            merged.append(e)
+
+    return merged
+
+
+def _format_literature_context(entries: list[dict]) -> str:
+    """Format merged entries into context string for the LLM."""
+    if not entries:
+        return "No matching articles were found across PubMed, PMC, NCBI Bookshelf, or OpenStax."
+    parts = []
+    for idx, e in enumerate(entries, start=1):
+        source = e.get("source", "unknown")
+        title = e.get("title", "")
+        url = (e.get("url") or "").strip()
+        text = (e.get("text") or "")[:8000]
+        if url:
+            parts.append(f"[{idx}] Source: {source}\nTitle: {title}\nURL: {url}\nText: {text}\n")
+        else:
+            parts.append(f"[{idx}] Source: {source}\nTitle: {title}\nText: {text}\n")
+    return "\n---\n\n".join(parts)
+
+
+def fetch_all_literature_context_hybrid(question: str, limit: int = 30) -> str:
+    """
+    Hybrid retrieval: try RAG (ChromaDB) first, fall back to ILIKE (Snowflake) if few results.
+    Merge and deduplicate, then return formatted context for the LLM.
+    """
+    RAG_MIN_RESULTS = 5  # If RAG returns fewer, use ILIKE too
+
+    rag_entries = _fetch_rag_entries(question, limit=15)
+    ilike_entries: list[dict] = []
+    if len(rag_entries) < RAG_MIN_RESULTS:
+        ilike_entries = _fetch_ilike_entries(question, limit=limit)
+
+    merged = _merge_and_dedupe_literature(rag_entries, ilike_entries)
+    return _format_literature_context(merged)
 
 
 def fetch_symptom_disease_context(question: str, limit: int = 50) -> str:
@@ -237,8 +382,8 @@ def ask(question: Question):
     Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
     and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
     """
-    # 1) Search all literature at once (no dbt required; we union raw tables in SQL)
-    literature = fetch_all_literature_context(question.question, limit=30)
+    # 1) Hybrid: RAG (ChromaDB) first, ILIKE (Snowflake) fallback when few results; merge & dedupe
+    literature = fetch_all_literature_context_hybrid(question.question, limit=30)
     # 2) Add symptom → rare-disease matches when the question looks like symptoms
     symptom_block = fetch_symptom_disease_context(question.question, limit=50)
 
@@ -293,9 +438,9 @@ def ask(question: Question):
 def ask_both(question: Question):
     """
     Return two answers for the same question: one from Gemini (Vertex AI) and one from
-    Snowflake Cortex (claude-sonnet-4-6), both using the same Snowflake context.
+    Snowflake Cortex (claude-sonnet-4-6), both using the same hybrid context (RAG + ILIKE).
     """
-    literature = fetch_all_literature_context(question.question, limit=30)
+    literature = fetch_all_literature_context_hybrid(question.question, limit=30)
     symptom_block = fetch_symptom_disease_context(question.question, limit=50)
     context = literature + ("\n\n" + symptom_block if symptom_block else "")
 
