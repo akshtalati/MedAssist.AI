@@ -1,0 +1,113 @@
+# MedAssist.AI Architecture (Snowflake-First)
+
+This diagram reflects the current implementation in this repository, with **Snowflake as the primary system of record for analytics and retrieval-ready datasets**.
+
+```mermaid
+flowchart TB
+    %% External sources
+    subgraph EXT[External Medical Data Sources]
+      S1[PubMed E-Utilities]
+      S2[PubMed Central E-Utilities]
+      S3[OpenFDA API]
+      S4[Orphanet XML]
+      S5[RxNorm RxNav API]
+      S6[WHO API]
+      S7[NCBI Bookshelf E-Utilities]
+      S8[OpenStax PDFs]
+    end
+
+    %% Ingestion runtime
+    subgraph ING[Ingestion Layer - Python Fetchers]
+      F0[BaseFetcher\nretry + rate limit + backoff]
+      F1[Source Fetchers\n(pubmed/pmc/openfda/orphanet/rxnorm/who/ncbi/openstax)]
+      W[DataWriter + Manifest Writer]
+    end
+
+    %% Local staging
+    subgraph STG[Local Data Staging]
+      R[(data/raw/*)]
+      M[(data/metadata/*_manifest.json)]
+      N[(data/normalized/symptom_index.json)]
+      C[(data/vectors/ChromaDB)]
+    end
+
+    %% Processing/indexing
+    subgraph IDX[Indexing Layer]
+      I1[Orphanet Symptom Index Builder\nscripts/build_symptom_index.py]
+      I2[RAG Index Builder\nscripts/build_rag_index.py]
+    end
+
+    %% Orchestration
+    subgraph ORCH[Orchestration]
+      A1[Airflow DAG: medassist_ingestion\nfetch_checkpointed -> cleanup_duplicates -> build_symptom_index]
+      A2[CLI scripts\nfetch_all / fetch_source / checkpointed fetch]
+    end
+
+    %% Snowflake primary
+    subgraph SF[Snowflake Primary Platform]
+      WH[Warehouse\nMEDASSIST_WH]
+      DB[(Database\nMEDASSIST_DB)]
+      RAW[Schema RAW\nFETCH_MANIFESTS\nPUBMED_ARTICLES\nPMC_ARTICLES]
+      NOR[Schema NORMALIZED\nSYMPTOM_DISEASE_MAP\nDISEASES]
+      VEC[Schema VECTORS\nRAG_CHUNKS (VECTOR 384)]
+    end
+
+    %% Consumption
+    subgraph CON[Query & Consumption]
+      Q1[Symptom query CLI\nscripts/query_symptoms.py]
+      Q2[RAG query CLI\nscripts/query_rag.py]
+      Q3[Snowflake SQL / BI / apps]
+    end
+
+    %% Flow
+    S1 --> F1
+    S2 --> F1
+    S3 --> F1
+    S4 --> F1
+    S5 --> F1
+    S6 --> F1
+    S7 --> F1
+    S8 --> F1
+
+    F0 --> F1
+    F1 --> W
+    W --> R
+    W --> M
+
+    A1 --> A2
+    A2 --> F1
+
+    R --> I1 --> N
+    R --> I2 --> C
+
+    M --> L1[load_to_snowflake.py]
+    R --> L1
+    N --> L1
+    C --> L1
+
+    L1 --> WH --> DB
+    DB --> RAW
+    DB --> NOR
+    DB --> VEC
+
+    N --> Q1
+    C --> Q2
+    RAW --> Q3
+    NOR --> Q3
+    VEC --> Q3
+```
+
+## Notes from repository analysis
+
+- `Snowflake` is set up through `scripts/snowflake_setup.sql` and loaded via `scripts/load_to_snowflake.py`.
+- Current table loads implemented:
+  - `RAW.FETCH_MANIFESTS`
+  - `RAW.PUBMED_ARTICLES`
+  - `RAW.PMC_ARTICLES`
+  - `NORMALIZED.SYMPTOM_DISEASE_MAP`
+  - `VECTORS.RAG_CHUNKS`
+- `NORMALIZED.DISEASES` is created in SQL but is not populated by `load_to_snowflake.py` today.
+- `dags/README.md` describes optional DAG branches for RAG and Snowflake, but current `dags/medassist_ingestion_dag.py` includes three tasks only:
+  - `fetch_checkpointed`
+  - `cleanup_duplicates`
+  - `build_symptom_index`

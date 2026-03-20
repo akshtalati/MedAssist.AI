@@ -108,6 +108,22 @@ python scripts/query_rag.py "acute porphyria symptoms" -n 10
 
 Index is stored in `data/vectors/` (ChromaDB). Uses `all-MiniLM-L6-v2` for embeddings.
 
+## Doctor-Side Frontend (Streamlit)
+
+A clinical intake and recommendation UI is available in Streamlit:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Features:
+- Structured intake form (history, meds, allergies, symptoms)
+- Rule-based differential + red-flag highlighting
+- Rare disease recommendations from `data/normalized/symptom_index.json`
+- Optional RAG evidence snippets from `data/vectors/`
+- Optional API-based LLM recommendation via `POST /ask` (set URL in sidebar)
+
 ## Snowflake (Phase 2 - optional)
 
 Create warehouse, database, and tables, then load data:
