@@ -3,9 +3,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 from pathlib import Path
+import json
 
 from google import genai
 from google.genai import types
+
+from sentence_transformers import SentenceTransformer
 
 from src.snowflake_client import get_connection
 
@@ -16,6 +19,9 @@ try:
 except ImportError:
     _RAG_AVAILABLE = False
     query_rag = None
+
+# Local embedding model for Cortex vector search (same as build_rag_index)
+_rag_embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 # Configure Vertex AI client (uses gcloud ADC, no API key)
@@ -341,6 +347,141 @@ def cortex_complete(prompt: str) -> str:
         conn.close()
 
 
+def cortex_diagnostic_answer(question: str) -> str:
+    """
+    End-to-end MedRAG-style reasoning in Snowflake Cortex.
+
+    - Embeds the question locally with sentence-transformers (same model as RAG index).
+    - Retrieves top-k semantic matches from VECTORS.RAG_CHUNKS.
+    - Retrieves candidate rare diseases from NORMALIZED.SYMPTOM_DISEASE_MAP.
+    - Builds a structured prompt that asks for diagnoses, treatments, and follow-up questions.
+    - Calls SNOWFLAKE.CORTEX.COMPLETE and returns the answer text.
+    """
+    # 1) Embed question locally to a 384-dim vector (all-MiniLM-L6-v2)
+    q_vec = _rag_embed_model.encode([question])[0]
+    q_vec_str = "[" + ",".join(str(float(x)) for x in q_vec) + "]"
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        sql = """
+            WITH
+            q AS (
+                SELECT PARSE_JSON(%s)::VECTOR(FLOAT, 384) AS q_vec
+            ),
+            rag AS (
+                SELECT
+                    r.chunk_id,
+                    r.source,
+                    r.document_text,
+                    r.metadata,
+                    VECTOR_COSINE_SIMILARITY(q.q_vec, r.embedding) AS sim
+                FROM VECTORS.RAG_CHUNKS AS r,
+                     q
+                ORDER BY sim DESC
+                LIMIT 12
+            ),
+            rag_ranked AS (
+                SELECT
+                    chunk_id,
+                    source,
+                    document_text,
+                    metadata,
+                    sim,
+                    ROW_NUMBER() OVER (ORDER BY sim DESC) AS rn
+                FROM rag
+            ),
+            rag_text AS (
+                SELECT
+                    LISTAGG(
+                        CONCAT(
+                            '[',
+                            rn,
+                            '] Source: ',
+                            source,
+                            '; Snippet: ',
+                            LEFT(document_text, 600)
+                        ),
+                        '\n\n'
+                    ) WITHIN GROUP (ORDER BY rn) AS text
+                FROM rag_ranked
+            ),
+            tokens AS (
+                SELECT DISTINCT LOWER(TRIM(value::string)) AS token
+                FROM TABLE(SPLIT_TO_TABLE(%s, ' '))
+                WHERE LENGTH(token) > 3
+            ),
+            orpha_candidates AS (
+                SELECT
+                    d.orpha_code,
+                    d.disease_name,
+                    ARRAY_AGG(DISTINCT s.symptom) AS symptom_list
+                FROM NORMALIZED.SYMPTOM_DISEASE_MAP AS s
+                JOIN NORMALIZED.DISEASES AS d
+                  ON d.orpha_code = s.orpha_code
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM tokens t
+                    WHERE s.symptom ILIKE '%%' || t.token || '%%'
+                )
+                GROUP BY d.orpha_code, d.disease_name
+                LIMIT 25
+            ),
+            orpha_text AS (
+                SELECT
+                    LISTAGG(
+                        CONCAT(
+                            '- ',
+                            disease_name,
+                            ' (ORPHA:',
+                            orpha_code,
+                            '); symptoms: ',
+                            ARRAY_TO_STRING(symptom_list, ', ')
+                        ),
+                        '\n'
+                    ) WITHIN GROUP (ORDER BY disease_name) AS text
+                FROM orpha_candidates
+            ),
+            prompt AS (
+                SELECT
+                    CONCAT(
+                        'You are MedAssist.AI, a medical assistant for clinicians.\n\n',
+                        'Use ONLY the provided context and rare-disease candidates as your primary evidence. ',
+                        'If the context is incomplete or multiple diagnoses are plausible, you MUST:\n',
+                        '1) Explicitly say that information is limited or ambiguous, and\n',
+                        '2) Propose 3–6 very specific follow-up questions that would help distinguish between diseases.\n\n',
+                        'Respond in Markdown with the following sections:\n',
+                        '1. **Summary** – 2–3 sentences.\n',
+                        '2. **Likely Diagnoses** – bullet list, split into common vs rare (mark rare items and include ORPHA codes when given).\n',
+                        '3. **Reasoning** – short explanation of why these diagnoses fit (refer to key manifestations and context).\n',
+                        '4. **Treatment & Medication Suggestions** – bullet list; be conservative and mention when specialist input is needed.\n',
+                        '5. **Follow-up Questions** – 3–6 concrete questions you would ask the clinician or patient.\n',
+                        '6. **References** – 3–5 short references derived from the retrieved context (titles or brief identifiers; no URLs needed).\n\n',
+                        'Question:\n',
+                        %s,
+                        '\n\n',
+                        'Retrieved medical context (RAG over literature and guidelines):\n',
+                        COALESCE((SELECT text FROM rag_text), 'None.\n'),
+                        '\n\n',
+                        'Candidate rare diseases from Orphanet (symptom→disease index):\n',
+                        COALESCE((SELECT text FROM orpha_text), 'None.\n')
+                    ) AS full_prompt
+            )
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, full_prompt) AS answer
+            FROM prompt
+        """
+        # Parameters: embedded query vector JSON, question for token splitting,
+        # question for prompt body, model id for COMPLETE.
+        cur.execute(sql, (q_vec_str, question, question, CORTEX_MODEL))
+        row = cur.fetchone()
+        return (row[0] or "").strip() if row else ""
+    except Exception as e:
+        return f"[Cortex diagnostic error: {e}]"
+    finally:
+        cur.close()
+        conn.close()
+
+
 def _build_medassist_prompt(question: str, context: str) -> str:
     """Shared prompt for Gemini and Cortex (same context, same structure)."""
     return (
@@ -485,6 +626,18 @@ def ask_both(question: Question):
         "answer_gemini": answer_gemini,
         "answer_cortex": answer_cortex,
     }
+
+
+@app.post("/ask-cortex")
+def ask_cortex(question: Question):
+    """
+    MedRAG-style endpoint backed entirely by Snowflake Cortex.
+
+    Retrieval and reasoning (including follow-up questions) happen in Snowflake;
+    this endpoint only returns the final Cortex answer text.
+    """
+    answer = cortex_diagnostic_answer(question.question)
+    return {"answer": answer}
 
 
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----
