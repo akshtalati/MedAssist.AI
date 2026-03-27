@@ -70,35 +70,88 @@ def inject_theme() -> None:
     st.markdown(
         """
         <style>
-            .stApp {
-                background:
-                    radial-gradient(circle at 10% 10%, #fef4e8 0%, transparent 35%),
-                    radial-gradient(circle at 90% 5%, #e2f3eb 0%, transparent 30%),
-                    linear-gradient(180deg, #f8f6f2 0%, #f3efe8 100%);
-                color: #1b1f24;
-            }
+            /* Hide deploy button, record screen, and main menu extras */
+            [data-testid="stToolbar"] { display: none !important; }
+            #MainMenu { visibility: hidden; }
+            header { visibility: hidden; }
+            footer { visibility: hidden; }
+
             .block-container { padding-top: 1.2rem; max-width: 900px; }
             .hero { margin-bottom: 0.8rem; }
-            .card {
-                background: #fbfaf7;
-                border: 1px solid #d6d0c6;
-                border-radius: 12px;
-                padding: 0.7rem 0.85rem;
-                margin: 0.35rem 0;
+
+            /* Light mode */
+            @media (prefers-color-scheme: light) {
+                .stApp {
+                    background:
+                        radial-gradient(circle at 10% 10%, #fef4e8 0%, transparent 35%),
+                        radial-gradient(circle at 90% 5%, #e2f3eb 0%, transparent 30%),
+                        linear-gradient(180deg, #f8f6f2 0%, #f3efe8 100%);
+                    color: #1b1f24;
+                }
+                .card {
+                    background: #fbfaf7;
+                    border: 1px solid #d6d0c6;
+                    border-radius: 12px;
+                    padding: 0.7rem 0.85rem;
+                    margin: 0.35rem 0;
+                }
+                .danger {
+                    border-left: 5px solid #ad2f45;
+                    background: #fff4f6;
+                    padding: 0.7rem 0.9rem;
+                    border-radius: 10px;
+                    margin: 0.45rem 0;
+                }
+                .ok {
+                    border-left: 5px solid #2f7f5f;
+                    background: #f2fbf6;
+                    padding: 0.7rem 0.9rem;
+                    border-radius: 10px;
+                    margin: 0.45rem 0;
+                }
             }
-            .danger {
-                border-left: 5px solid #ad2f45;
-                background: #fff4f6;
-                padding: 0.7rem 0.9rem;
-                border-radius: 10px;
-                margin: 0.45rem 0;
+
+            /* Dark mode */
+            @media (prefers-color-scheme: dark) {
+                .stApp {
+                    background:
+                        radial-gradient(circle at 10% 10%, #1a2332 0%, transparent 35%),
+                        radial-gradient(circle at 90% 5%, #162420 0%, transparent 30%),
+                        linear-gradient(180deg, #0e1117 0%, #131720 100%);
+                    color: #e6edf3;
+                }
+                .card {
+                    background: #161b22;
+                    border: 1px solid #30363d;
+                    border-radius: 12px;
+                    padding: 0.7rem 0.85rem;
+                    margin: 0.35rem 0;
+                    color: #e6edf3;
+                }
+                .danger {
+                    border-left: 5px solid #f85149;
+                    background: #2d1215;
+                    padding: 0.7rem 0.9rem;
+                    border-radius: 10px;
+                    margin: 0.45rem 0;
+                    color: #f0b8b8;
+                }
+                .ok {
+                    border-left: 5px solid #3fb950;
+                    background: #12261e;
+                    padding: 0.7rem 0.9rem;
+                    border-radius: 10px;
+                    margin: 0.45rem 0;
+                    color: #a3d9b1;
+                }
             }
-            .ok {
-                border-left: 5px solid #2f7f5f;
-                background: #f2fbf6;
-                padding: 0.7rem 0.9rem;
-                border-radius: 10px;
-                margin: 0.45rem 0;
+
+            /* Streamlit-specific dark mode override (uses data attribute) */
+            [data-testid="stAppViewContainer"][data-theme="dark"] .card,
+            .stApp[data-testid="stAppViewContainer"].st-emotion-cache-dark .card {
+                background: #161b22;
+                border-color: #30363d;
+                color: #e6edf3;
             }
         </style>
         """,
