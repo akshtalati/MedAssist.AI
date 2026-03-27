@@ -811,28 +811,29 @@ def load_rag_chunks(cursor) -> int:
         SELECT %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s)::VECTOR(FLOAT, 384)
         WHERE NOT EXISTS (SELECT 1 FROM VECTORS.RAG_CHUNKS WHERE chunk_id=%s)
     """
-    batch = []
     count = 0
     for i, cid in enumerate(data["ids"]):
-        doc = data["documents"][i] if data["documents"] else ""
-        meta = data["metadatas"][i] if data["metadatas"] else {}
-        emb = data["embeddings"][i] if data["embeddings"] else []
+        # Access with bounds checks; data["documents"]/["metadatas"]/["embeddings"] may be lists or arrays
+        docs = data.get("documents") or []
+        metas = data.get("metadatas") or []
+        embs = data.get("embeddings")
+
+        doc = docs[i] if i < len(docs) else ""
+        meta = metas[i] if i < len(metas) else {}
+        emb = embs[i] if embs is not None and i < len(embs) else []
         if len(emb) != 384:
             continue  # all-MiniLM-L6-v2 produces 384-dim vectors
         try:
             meta_json = json.dumps(meta) if meta else "{}"
             emb_str = "[" + ",".join(str(float(x)) for x in emb) + "]"
-            batch.append((cid, meta.get("source", "unknown"), doc[:100000], meta_json, emb_str, cid))
-            if len(batch) >= BATCH_SIZE:
-                cursor.executemany(sql, batch)
-                count += len(batch)
+            row = (cid, meta.get("source", "unknown"), doc[:100000], meta_json, emb_str, cid)
+            # Single-row insert to avoid Snowflake 252001 multi-row rewrite issues
+            cursor.execute(sql, row)
+            count += 1
+            if count % 200 == 0:
                 print(f"  RAG chunks: {count}...", flush=True)
-                batch = []
         except Exception as e:
             print(f"  Skip chunk {cid}: {e}")
-    if batch:
-        cursor.executemany(sql, batch)
-        count += len(batch)
     return count
 
 
