@@ -3,9 +3,16 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 from pathlib import Path
+import json
 
 from google import genai
 from google.genai import types
+import re
+
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:
+    SentenceTransformer = None
 
 from src.snowflake_client import get_connection
 
@@ -16,6 +23,16 @@ try:
 except ImportError:
     _RAG_AVAILABLE = False
     query_rag = None
+
+# Local embedding model for Cortex vector search (same as build_rag_index).
+# This is optional so the app can still load (and use Cortex COMPLETE / Gemini fallback)
+# even when torch/sentence-transformers aren’t fully functional in the active venv.
+_rag_embed_model = None
+if SentenceTransformer is not None:
+    try:
+        _rag_embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception:
+        _rag_embed_model = None
 
 
 # Configure Vertex AI client (uses gcloud ADC, no API key)
@@ -54,6 +71,104 @@ def index():
 class Question(BaseModel):
     question: str
     brief: bool = False  # if True, use short answer + references only
+
+
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "how",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "may",
+    "might",
+    "of",
+    "on",
+    "or",
+    "our",
+    "should",
+    "that",
+    "the",
+    "their",
+    "then",
+    "these",
+    "they",
+    "this",
+    "to",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "will",
+    "with",
+    "would",
+    "your",
+    # Common query scaffolding words that are not clinical terms
+    "condition",
+    "conditions",
+    "present",
+    "presenting",
+    "differential",
+    "diagnosis",
+    "diagnoses",
+    "red",
+    "flag",
+    "flags",
+    "consider",
+    "associated",
+    "symptom",
+    "symptoms",
+    "treatment",
+    "treatments",
+    "next",
+    "steps",
+    "suspected",
+    "cause",
+    "causes",
+}
+
+
+def _extract_query_terms(question: str, *, max_terms: int = 8) -> list[str]:
+    """
+    Extract useful query terms from a natural-language question for SQL ILIKE matching.
+    Keeps short list of non-stopword tokens to avoid pulling irrelevant matches.
+    """
+    text = (question or "").lower()
+    tokens = re.findall(r"[a-z0-9]+", text)
+    terms: list[str] = []
+    for t in tokens:
+        if len(t) <= 2:
+            continue
+        if t in _STOPWORDS:
+            continue
+        if t not in terms:
+            terms.append(t)
+        if len(terms) >= max_terms:
+            break
+    return terms
 
 
 def fetch_all_literature_context(question: str, limit: int = 30) -> str:
@@ -149,8 +264,19 @@ def _fetch_ilike_entries(question: str, limit: int = 30) -> list[dict]:
     """
     conn = get_connection()
     cur = conn.cursor()
-    like = f"%{question}%"
     try:
+        terms = _extract_query_terms(question)
+        if not terms:
+            terms = [question.strip()] if (question or "").strip() else []
+
+        # Build a loose OR clause over tokens, so natural-language questions still match content.
+        # Example: "fever vomiting differential" becomes (title ILIKE %fever% OR abstract ILIKE %fever% OR ...)
+        token_clause = " OR ".join(["title ILIKE %s OR abstract ILIKE %s"] * len(terms)) if terms else "FALSE"
+        params: list[str | int] = []
+        for t in terms:
+            like = f"%{t}%"
+            params.extend([like, like])
+
         sql = """
             SELECT source, title, abstract, url
             FROM (
@@ -169,10 +295,11 @@ def _fetch_ilike_entries(question: str, limit: int = 30) -> list[dict]:
                 SELECT 'openstax', title, content AS abstract, COALESCE(source_url, '') AS url
                 FROM RAW.OPENSTAX_BOOKS
             ) unified
-            WHERE (title ILIKE %s OR abstract ILIKE %s)
+            WHERE ({token_clause})
             LIMIT %s
         """
-        cur.execute(sql, (like, like, limit))
+        sql = sql.format(token_clause=token_clause)
+        cur.execute(sql, tuple(params + [limit]))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -255,7 +382,8 @@ def fetch_symptom_disease_context(question: str, limit: int = 50) -> str:
     """
     conn = get_connection()
     cur = conn.cursor()
-    words = [w.strip() for w in question.lower().split() if len(w.strip()) > 2]
+    # Symptoms are usually content words; strip punctuation + common stopwords to avoid noisy matches.
+    words = _extract_query_terms(question, max_terms=6)
     if not words:
         return ""
 
@@ -341,6 +469,144 @@ def cortex_complete(prompt: str) -> str:
         conn.close()
 
 
+def cortex_diagnostic_answer(question: str) -> str:
+    """
+    End-to-end MedRAG-style reasoning in Snowflake Cortex.
+
+    - Embeds the question locally with sentence-transformers (same model as RAG index).
+    - Retrieves top-k semantic matches from VECTORS.RAG_CHUNKS.
+    - Retrieves candidate rare diseases from NORMALIZED.SYMPTOM_DISEASE_MAP.
+    - Builds a structured prompt that asks for diagnoses, treatments, and follow-up questions.
+    - Calls SNOWFLAKE.CORTEX.COMPLETE and returns the answer text.
+    """
+    if _rag_embed_model is None:
+        return "[Cortex diagnostic error: embedding model unavailable in this environment]"
+
+    # 1) Embed question locally to a 384-dim vector (all-MiniLM-L6-v2)
+    q_vec = _rag_embed_model.encode([question])[0]
+    q_vec_str = "[" + ",".join(str(float(x)) for x in q_vec) + "]"
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        sql = """
+            WITH
+            q AS (
+                SELECT PARSE_JSON(%s)::VECTOR(FLOAT, 384) AS q_vec
+            ),
+            rag AS (
+                SELECT
+                    r.chunk_id,
+                    r.source,
+                    r.document_text,
+                    r.metadata,
+                    VECTOR_COSINE_SIMILARITY(q.q_vec, r.embedding) AS sim
+                FROM VECTORS.RAG_CHUNKS AS r,
+                     q
+                ORDER BY sim DESC
+                LIMIT 12
+            ),
+            rag_ranked AS (
+                SELECT
+                    chunk_id,
+                    source,
+                    document_text,
+                    metadata,
+                    sim,
+                    ROW_NUMBER() OVER (ORDER BY sim DESC) AS rn
+                FROM rag
+            ),
+            rag_text AS (
+                SELECT
+                    LISTAGG(
+                        CONCAT(
+                            '[',
+                            rn,
+                            '] Source: ',
+                            source,
+                            '; Snippet: ',
+                            LEFT(document_text, 600)
+                        ),
+                        '\n\n'
+                    ) WITHIN GROUP (ORDER BY rn) AS text
+                FROM rag_ranked
+            ),
+            tokens AS (
+                SELECT DISTINCT LOWER(TRIM(value::string)) AS token
+                FROM TABLE(SPLIT_TO_TABLE(%s, ' '))
+                WHERE LENGTH(token) > 3
+            ),
+            orpha_candidates AS (
+                SELECT
+                    d.orpha_code,
+                    d.disease_name,
+                    ARRAY_AGG(DISTINCT s.symptom) AS symptom_list
+                FROM NORMALIZED.SYMPTOM_DISEASE_MAP AS s
+                JOIN NORMALIZED.DISEASES AS d
+                  ON d.orpha_code = s.orpha_code
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM tokens t
+                    WHERE s.symptom ILIKE '%%' || t.token || '%%'
+                )
+                GROUP BY d.orpha_code, d.disease_name
+                LIMIT 25
+            ),
+            orpha_text AS (
+                SELECT
+                    LISTAGG(
+                        CONCAT(
+                            '- ',
+                            disease_name,
+                            ' (ORPHA:',
+                            orpha_code,
+                            '); symptoms: ',
+                            ARRAY_TO_STRING(symptom_list, ', ')
+                        ),
+                        '\n'
+                    ) WITHIN GROUP (ORDER BY disease_name) AS text
+                FROM orpha_candidates
+            ),
+            prompt AS (
+                SELECT
+                    CONCAT(
+                        'You are MedAssist.AI, a medical assistant for clinicians.\n\n',
+                        'Use ONLY the provided context and rare-disease candidates as your primary evidence. ',
+                        'If the context is incomplete or multiple diagnoses are plausible, you MUST:\n',
+                        '1) Explicitly say that information is limited or ambiguous, and\n',
+                        '2) Propose 3–6 very specific follow-up questions that would help distinguish between diseases.\n\n',
+                        'Respond in Markdown with the following sections:\n',
+                        '1. **Summary** – 2–3 sentences.\n',
+                        '2. **Likely Diagnoses** – bullet list, split into common vs rare (mark rare items and include ORPHA codes when given).\n',
+                        '3. **Reasoning** – short explanation of why these diagnoses fit (refer to key manifestations and context).\n',
+                        '4. **Treatment & Medication Suggestions** – bullet list; be conservative and mention when specialist input is needed.\n',
+                        '5. **Follow-up Questions** – 3–6 concrete questions you would ask the clinician or patient.\n',
+                        '6. **References** – 3–5 short references derived from the retrieved context (titles or brief identifiers; no URLs needed).\n\n',
+                        'Question:\n',
+                        %s,
+                        '\n\n',
+                        'Retrieved medical context (RAG over literature and guidelines):\n',
+                        COALESCE((SELECT text FROM rag_text), 'None.\n'),
+                        '\n\n',
+                        'Candidate rare diseases from Orphanet (symptom→disease index):\n',
+                        COALESCE((SELECT text FROM orpha_text), 'None.\n')
+                    ) AS full_prompt
+            )
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, full_prompt) AS answer
+            FROM prompt
+        """
+        # Parameters: embedded query vector JSON, question for token splitting,
+        # question for prompt body, model id for COMPLETE.
+        cur.execute(sql, (q_vec_str, question, question, CORTEX_MODEL))
+        row = cur.fetchone()
+        return (row[0] or "").strip() if row else ""
+    except Exception as e:
+        return f"[Cortex diagnostic error: {e}]"
+    finally:
+        cur.close()
+        conn.close()
+
+
 def _build_medassist_prompt(question: str, context: str) -> str:
     """Shared prompt for Gemini and Cortex (same context, same structure)."""
     return (
@@ -376,6 +642,54 @@ def _build_medassist_prompt_brief(question: str, context: str) -> str:
     )
 
 
+def _generate_with_gemini(prompt: str) -> str:
+    """Generate answer with Gemini and return normalized text."""
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=prompt)],
+        )
+    ]
+
+    config = types.GenerateContentConfig(
+        temperature=0.3,
+        top_p=0.9,
+        max_output_tokens=4096,
+    )
+
+    response = client.models.generate_content(
+        model=MODEL_ID,
+        contents=contents,
+        config=config,
+    )
+
+    answer = ""
+    try:
+        if response.candidates:
+            c = response.candidates[0]
+            if getattr(c, "content", None) and getattr(c.content, "parts", None):
+                for p in c.content.parts:
+                    if hasattr(p, "text") and p.text:
+                        answer += p.text
+    except Exception:
+        pass
+    if not answer:
+        answer = getattr(response, "text", None) or ""
+    return answer.strip()
+
+
+def _is_valid_cortex_answer(answer: str) -> bool:
+    """Treat explicit Cortex error wrappers as failures."""
+    text = (answer or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    return not (
+        lowered.startswith("[cortex error:")
+        or lowered.startswith("[cortex diagnostic error:")
+    )
+
+
 @app.post("/ask")
 def ask(question: Question):
     """
@@ -397,41 +711,18 @@ def ask(question: Question):
         else _build_medassist_prompt(question.question, context)
     )
 
-    contents = [
-        types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=prompt)],
-        )
-    ]
+    # Default provider chain: Cortex first, Gemini fallback.
+    answer_cortex = cortex_complete(prompt)
+    if _is_valid_cortex_answer(answer_cortex):
+        return {"answer": answer_cortex, "provider": "cortex"}
 
-    config = types.GenerateContentConfig(
-        temperature=0.3,
-        top_p=0.9,
-        max_output_tokens=4096,
-    )
-
-    # Use non-streaming call to ensure we capture the full answer
-    response = client.models.generate_content(
-        model=MODEL_ID,
-        contents=contents,
-        config=config,
-    )
-
-    # Extract full text: join all parts from the first candidate (avoids truncation from .text)
-    answer = ""
-    try:
-        if response.candidates:
-            c = response.candidates[0]
-            if getattr(c, "content", None) and getattr(c.content, "parts", None):
-                for p in c.content.parts:
-                    if hasattr(p, "text") and p.text:
-                        answer += p.text
-    except Exception:
-        pass
-    if not answer:
-        answer = getattr(response, "text", None) or ""
-    answer = answer.strip()
-    return {"answer": answer}
+    answer_gemini = _generate_with_gemini(prompt)
+    return {
+        "answer": answer_gemini,
+        "provider": "gemini",
+        "fallback_from": "cortex",
+        "cortex_error": answer_cortex,
+    }
 
 
 @app.post("/ask-both")
@@ -451,32 +742,7 @@ def ask_both(question: Question):
     )
 
     # 1) Gemini
-    contents = [
-        types.Content(role="user", parts=[types.Part.from_text(text=prompt)]),
-    ]
-    config = types.GenerateContentConfig(
-        temperature=0.3,
-        top_p=0.9,
-        max_output_tokens=4096,
-    )
-    response = client.models.generate_content(
-        model=MODEL_ID,
-        contents=contents,
-        config=config,
-    )
-    answer_gemini = ""
-    try:
-        if response.candidates:
-            c = response.candidates[0]
-            if getattr(c, "content", None) and getattr(c.content, "parts", None):
-                for p in c.content.parts:
-                    if hasattr(p, "text") and p.text:
-                        answer_gemini += p.text
-    except Exception:
-        pass
-    if not answer_gemini:
-        answer_gemini = getattr(response, "text", None) or ""
-    answer_gemini = answer_gemini.strip()
+    answer_gemini = _generate_with_gemini(prompt)
 
     # 2) Cortex
     answer_cortex = cortex_complete(prompt)
@@ -485,6 +751,18 @@ def ask_both(question: Question):
         "answer_gemini": answer_gemini,
         "answer_cortex": answer_cortex,
     }
+
+
+@app.post("/ask-cortex")
+def ask_cortex(question: Question):
+    """
+    MedRAG-style endpoint backed entirely by Snowflake Cortex.
+
+    Retrieval and reasoning (including follow-up questions) happen in Snowflake;
+    this endpoint only returns the final Cortex answer text.
+    """
+    answer = cortex_diagnostic_answer(question.question)
+    return {"answer": answer}
 
 
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----
