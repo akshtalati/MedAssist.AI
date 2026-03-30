@@ -235,12 +235,36 @@ def query_rare_diseases(symptoms: list[str], max_rows: int) -> tuple[list[dict[s
     return all_matches[:max_rows], any_matches[:max_rows]
 
 
-def ask_llm(api_url: str, question: str, brief: bool) -> str:
+def ask_llm(api_url: str, question: str, brief: bool) -> dict:
     url = api_url.rstrip("/") + "/ask"
     payload = {"question": question, "brief": brief}
     r = requests.post(url, json=payload, timeout=120)
     r.raise_for_status()
-    return r.json().get("answer", "").strip()
+    data = r.json()
+    return {
+        "answer": (data.get("answer") or "").strip(),
+        "provider": data.get("provider", "unknown"),
+    }
+
+
+def ask_cortex(api_url: str, question: str) -> str:
+    url = api_url.rstrip("/") + "/ask-cortex"
+    payload = {"question": question}
+    r = requests.post(url, json=payload, timeout=180)
+    r.raise_for_status()
+    return (r.json().get("answer") or "").strip()
+
+
+def ask_both(api_url: str, question: str, brief: bool) -> dict:
+    url = api_url.rstrip("/") + "/ask-both"
+    payload = {"question": question, "brief": brief}
+    r = requests.post(url, json=payload, timeout=180)
+    r.raise_for_status()
+    data = r.json()
+    return {
+        "gemini": (data.get("answer_gemini") or "").strip(),
+        "cortex": (data.get("answer_cortex") or "").strip(),
+    }
 
 
 def main() -> None:
@@ -271,15 +295,26 @@ def main() -> None:
         history = st.text_area("History and key exam findings", height=100)
         submitted = st.form_submit_button("Generate")
 
-    if not submitted:
-        st.info("Fill the intake form and click `Generate Recommendations`.")
+    if submitted:
+        symptoms = sorted(set([s.lower() for s in symptoms_pick] + parse_custom_symptoms(symptoms_custom)))
+        st.session_state["case"] = {
+            "symptoms": symptoms,
+            "case_text": build_case_text(age, sex, history, symptoms, "", "", ""),
+            "red_flags": red_flags_for(symptoms, history),
+            "local_dx": local_differentials(symptoms),
+            "all_matches": query_rare_diseases(symptoms, max_rows=8)[0],
+        }
+
+    if "case" not in st.session_state:
+        st.info("Fill the intake form and click **Generate**.")
         return
 
-    symptoms = sorted(set([s.lower() for s in symptoms_pick] + parse_custom_symptoms(symptoms_custom)))
-    case_text = build_case_text(age, sex, history, symptoms, "", "", "")
-    red_flags = red_flags_for(symptoms, history)
-    local_dx = local_differentials(symptoms)
-    all_matches, _ = query_rare_diseases(symptoms, max_rows=8)
+    case = st.session_state["case"]
+    symptoms = case["symptoms"]
+    case_text = case["case_text"]
+    red_flags = case["red_flags"]
+    local_dx = case["local_dx"]
+    all_matches = case["all_matches"]
 
     st.subheader("Clinical Recommendations")
     st.markdown("<div class='card'><b>Initial Differential</b></div>", unsafe_allow_html=True)
@@ -302,18 +337,61 @@ def main() -> None:
     else:
         st.write("No strict rare-disease matches.")
 
-    with st.expander("Optional: AI recommendation"):
+    with st.expander("AI-Powered Recommendations", expanded=True):
         api_url = st.text_input("API URL", value="http://127.0.0.1:8000")
-        if st.button("Generate AI recommendation"):
-            with st.spinner("Fetching AI recommendation..."):
-                try:
-                    answer = ask_llm(api_url=api_url, question=case_text, brief=True)
-                    if answer:
-                        st.markdown(answer)
-                    else:
-                        st.warning("API returned an empty answer.")
-                except Exception as exc:
-                    st.error(f"API call failed: {exc}")
+        ai_mode = st.radio(
+            "AI Provider",
+            ["Auto (Cortex → Gemini fallback)", "Cortex Only (MedRAG)", "Gemini Only", "Compare Both"],
+            horizontal=True,
+        )
+
+        if st.button("Generate AI Recommendation"):
+            if ai_mode == "Compare Both":
+                with st.spinner("Querying Gemini and Cortex..."):
+                    try:
+                        results = ask_both(api_url=api_url, question=case_text, brief=True)
+                        col_g, col_c = st.columns(2)
+                        with col_g:
+                            st.markdown("<div class='card'><b>Gemini (Vertex AI)</b></div>", unsafe_allow_html=True)
+                            if results["gemini"]:
+                                st.markdown(results["gemini"])
+                            else:
+                                st.warning("Gemini returned an empty answer.")
+                        with col_c:
+                            st.markdown("<div class='card'><b>Cortex (Snowflake)</b></div>", unsafe_allow_html=True)
+                            if results["cortex"]:
+                                st.markdown(results["cortex"])
+                            else:
+                                st.warning("Cortex returned an empty answer.")
+                    except Exception as exc:
+                        st.error(f"API call failed: {exc}")
+
+            elif ai_mode == "Cortex Only (MedRAG)":
+                with st.spinner("Querying Snowflake Cortex (MedRAG)..."):
+                    try:
+                        answer = ask_cortex(api_url=api_url, question=case_text)
+                        if answer:
+                            st.markdown("<div class='card'><b>Cortex MedRAG Response</b></div>", unsafe_allow_html=True)
+                            st.markdown(answer)
+                        else:
+                            st.warning("Cortex returned an empty answer.")
+                    except Exception as exc:
+                        st.error(f"Cortex API call failed: {exc}")
+
+            else:
+                label = "Querying AI..." if ai_mode == "Gemini Only" else "Querying (Cortex → Gemini fallback)..."
+                with st.spinner(label):
+                    try:
+                        result = ask_llm(api_url=api_url, question=case_text, brief=True)
+                        if result["answer"]:
+                            provider = result["provider"]
+                            badge = "Gemini" if provider == "gemini" else "Cortex" if provider == "cortex" else provider
+                            st.markdown(f"<div class='card'><b>AI Response</b> &nbsp;<code>{badge}</code></div>", unsafe_allow_html=True)
+                            st.markdown(result["answer"])
+                        else:
+                            st.warning("API returned an empty answer.")
+                    except Exception as exc:
+                        st.error(f"API call failed: {exc}")
 
     st.caption(
         "For clinical support only. This tool does not replace physician judgment, protocol-based care, or emergency escalation."

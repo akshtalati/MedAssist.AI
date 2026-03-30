@@ -581,7 +581,7 @@ def cortex_diagnostic_answer(question: str) -> str:
                         '3. **Reasoning** – short explanation of why these diagnoses fit (refer to key manifestations and context).\n',
                         '4. **Treatment & Medication Suggestions** – bullet list; be conservative and mention when specialist input is needed.\n',
                         '5. **Follow-up Questions** – 3–6 concrete questions you would ask the clinician or patient.\n',
-                        '6. **References** – 3–5 short references derived from the retrieved context (titles or brief identifiers; no URLs needed).\n\n',
+                        '6. **References** – 3–5 references as clickable markdown links in the format [Title](URL), using URLs from the retrieved context when available.\n\n',
                         'Question:\n',
                         %s,
                         '\n\n',
@@ -623,7 +623,10 @@ def _build_medassist_prompt(question: str, context: str) -> str:
         "3. **Rare Diseases (from Orphanet)** – bullet list; mark items that came from the Orphanet data (at least 3 if present in context).\n"
         "4. **Red-Flag Features** – bullet list of findings that require urgent action (at least 4 items).\n"
         "5. **Suggested Next Steps** – bullet list of investigations / management steps (at least 4 items).\n"
-        "6. **References** – list 3–5 key sources as markdown links in the form [Title](URL), using only URLs provided in the context.\n\n"
+        "6. **References** – list 3–5 key sources as clickable markdown hyperlinks. "
+        "Each reference MUST use the format `- [Article Title](https://full-url-from-context)`. "
+        "Use ONLY the exact URLs provided in the context (e.g. https://pubmed.ncbi.nlm.nih.gov/..., "
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/...). Never invent URLs.\n\n"
         f"Question:\n{question}\n\n"
         f"Context:\n{context}\n"
     )
@@ -636,7 +639,9 @@ def _build_medassist_prompt_brief(question: str, context: str) -> str:
         "Use the context below as your PRIMARY evidence. Give a very concise answer.\n\n"
         "Respond in **Markdown** with:\n"
         "1. **Summary** – 3–5 bullet points (one line each). No long paragraphs.\n"
-        "2. **References** – list 3–5 key sources as markdown links [Title](URL), using only URLs from the context.\n\n"
+        "2. **References** – list 3–5 key sources as clickable markdown hyperlinks. "
+        "Each reference MUST use the format `- [Article Title](https://full-url-from-context)`. "
+        "Use ONLY the exact URLs provided in the context. Never invent URLs.\n\n"
         f"Question:\n{question}\n\n"
         f"Context:\n{context}\n"
     )
