@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
@@ -15,6 +15,30 @@ except Exception:
     SentenceTransformer = None
 
 from src.snowflake_client import get_connection
+from src.clinical_workflow import (
+    EncounterInput,
+    answer_and_update_tx,
+    add_answer,
+    add_question,
+    append_audit_row,
+    create_encounter,
+    create_encounter_tx,
+    ensure_clinical_tables,
+    fetch_idempotent_response,
+    get_encounter,
+    get_latest_kg_build_meta,
+    hash_payload,
+    next_turn_no,
+    rank_diseases_from_symptom_map,
+    rank_diseases_from_graph,
+    save_differential,
+    save_diff_delta,
+    seed_graph_from_symptom_map,
+    store_idempotent_response,
+)
+from src.followup_policy import MAX_TURNS_DEFAULT, next_question as policy_next_question, safety_rails
+from src.grounding import extract_urls_from_context, validate_grounding
+from src.response_contract import contract_to_markdown, normalize_contract, validate_contract
 
 # RAG (ChromaDB) - optional; falls back to ILIKE if unavailable
 try:
@@ -28,11 +52,19 @@ except ImportError:
 # This is optional so the app can still load (and use Cortex COMPLETE / Gemini fallback)
 # even when torch/sentence-transformers aren’t fully functional in the active venv.
 _rag_embed_model = None
-if SentenceTransformer is not None:
+
+
+def _get_rag_embed_model():
+    global _rag_embed_model
+    if _rag_embed_model is not None:
+        return _rag_embed_model
+    if SentenceTransformer is None:
+        return None
     try:
         _rag_embed_model = SentenceTransformer("all-MiniLM-L6-v2")
     except Exception:
         _rag_embed_model = None
+    return _rag_embed_model
 
 
 # Configure Vertex AI client (uses gcloud ADC, no API key)
@@ -53,6 +85,9 @@ if not VERTEX_AI_DATASTORE_PATH and os.environ.get("VERTEX_AI_DATASTORE_ID"):
         + os.environ["VERTEX_AI_DATASTORE_ID"]
     )
 
+CLINICAL_USE_CORTEX = os.environ.get("CLINICAL_USE_CORTEX", "0") == "1"
+CLINICAL_MAX_TURNS = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFAULT)))
+
 app = FastAPI(title="MedAssist.AI API")
 
 # Frontend: serve static UI at /
@@ -71,6 +106,28 @@ def index():
 class Question(BaseModel):
     question: str
     brief: bool = False  # if True, use short answer + references only
+
+
+class SymptomInput(BaseModel):
+    symptom: str
+    onset: str | None = None
+    severity: str | None = None
+    duration: str | None = None
+
+
+class EncounterStartRequest(BaseModel):
+    age: int | None = None
+    sex: str | None = None
+    known_conditions: list[str] = []
+    medications: list[str] = []
+    allergies: list[str] = []
+    history_summary: str = ""
+    symptoms: list[SymptomInput] = []
+
+
+class EncounterAnswerRequest(BaseModel):
+    turn_no: int
+    answer: str
 
 
 _STOPWORDS = {
@@ -479,11 +536,12 @@ def cortex_diagnostic_answer(question: str) -> str:
     - Builds a structured prompt that asks for diagnoses, treatments, and follow-up questions.
     - Calls SNOWFLAKE.CORTEX.COMPLETE and returns the answer text.
     """
-    if _rag_embed_model is None:
+    embed_model = _get_rag_embed_model()
+    if embed_model is None:
         return "[Cortex diagnostic error: embedding model unavailable in this environment]"
 
     # 1) Embed question locally to a 384-dim vector (all-MiniLM-L6-v2)
-    q_vec = _rag_embed_model.encode([question])[0]
+    q_vec = embed_model.encode([question])[0]
     q_vec_str = "[" + ",".join(str(float(x)) for x in q_vec) + "]"
 
     conn = get_connection()
@@ -768,6 +826,392 @@ def ask_cortex(question: Question):
     """
     answer = cortex_diagnostic_answer(question.question)
     return {"answer": answer}
+
+
+def _summarize_encounter_context(encounter: dict) -> str:
+    symptoms = encounter.get("symptoms", [])
+    symptom_lines = []
+    for s in symptoms:
+        symptom_lines.append(
+            f"- {s.get('symptom')} (onset={s.get('onset') or 'unknown'}, severity={s.get('severity') or 'unknown'}, duration={s.get('duration') or 'unknown'})"
+        )
+    qa = encounter.get("qa_history", [])
+    qa_lines = [f"- Q{item['turn_no']}: {item['question']} | A: {item.get('answer') or 'pending'}" for item in qa]
+
+    return (
+        f"Patient profile:\n"
+        f"- Age: {encounter.get('age')}\n"
+        f"- Sex: {encounter.get('sex')}\n"
+        f"- Known conditions: {', '.join(encounter.get('known_conditions') or []) or 'None'}\n"
+        f"- Medications: {', '.join(encounter.get('medications') or []) or 'None'}\n"
+        f"- Allergies: {', '.join(encounter.get('allergies') or []) or 'None'}\n"
+        f"- History summary: {encounter.get('history_summary') or 'None'}\n\n"
+        f"Symptoms:\n{chr(10).join(symptom_lines) if symptom_lines else '- None'}\n\n"
+        f"Prior follow-up QA:\n{chr(10).join(qa_lines) if qa_lines else '- None'}"
+    )
+
+
+def _initial_assessment_prompt(encounter: dict, candidates: list[dict]) -> str:
+    context = _summarize_encounter_context(encounter)
+    cand_lines = [
+        f"- {c['disease_name']} ({c.get('disease_code') or 'no-code'}): {c.get('rationale')}"
+        for c in candidates
+    ]
+    return (
+        "You are MedAssist.AI supporting a clinician.\n\n"
+        "Use the patient context and knowledge-graph ranked candidates. Be precise and conservative.\n\n"
+        "Return Markdown sections:\n"
+        "1. Summary\n"
+        "2. Prioritized Differential (top 5)\n"
+        "3. Why these diagnoses fit\n"
+        "4. Red Flags requiring urgent action\n"
+        "5. Next tests / management steps\n"
+        "6. Follow-up Questions (3-5)\n\n"
+        f"{context}\n\n"
+        "Knowledge graph ranked candidates:\n"
+        f"{chr(10).join(cand_lines) if cand_lines else '- None'}"
+    )
+
+
+def _build_contract_from_candidates(encounter: dict, candidates: list[dict], *, latest_answer: str | None = None) -> dict:
+    symptoms = ", ".join(s.get("symptom", "") for s in encounter.get("symptoms", [])) or "none"
+    profile = f"Symptoms currently tracked: {symptoms}"
+    if latest_answer:
+        profile += f". Latest clinician input: {latest_answer}"
+    rails = safety_rails(encounter, confidence=0.45 if candidates else 0.2)
+    payload = {
+        "summary": profile,
+        "differential": candidates[:8],
+        "red_flags": rails["red_flags"],
+        "next_steps": [
+            "Reassess vitals and red flags after each new symptom update.",
+            "Order targeted tests based on top candidates and symptom chronology.",
+            "Continue structured follow-up questions to reduce uncertainty.",
+        ],
+        "follow_up_questions": [],
+        "confidence": 0.65 if candidates else 0.25,
+        "insufficient_evidence": len(candidates) == 0,
+        "uncertainty_note": rails["uncertainty_note"],
+        "contraindications": rails["contraindications"],
+    }
+    return normalize_contract(payload)
+
+
+def _attempt_rank_with_degradation(encounter_id: str, limit: int = 12) -> tuple[list[dict], str, list[str]]:
+    errors: list[str] = []
+    try:
+        ranked = rank_diseases_from_graph(encounter_id, limit=limit)
+        return ranked, "none", errors
+    except Exception as exc:
+        errors.append(f"kg_unavailable:{exc}")
+        try:
+            ranked = rank_diseases_from_symptom_map(encounter_id, limit=limit)
+            return ranked, "symptom_map_only", errors
+        except Exception as exc2:
+            errors.append(f"symptom_map_unavailable:{exc2}")
+            return [], "no_ranker", errors
+
+
+def _render_data_only_fallback(encounter: dict, candidates: list[dict], latest_answer: str | None = None) -> str:
+    contract = _build_contract_from_candidates(encounter, candidates, latest_answer=latest_answer)
+    contract["summary"] = (
+        contract["summary"]
+        + " Generated in data-only mode because deep reasoning provider was unavailable."
+    )
+    return contract_to_markdown(contract)
+
+
+def _enforce_response_contract_markdown(answer: str, encounter: dict, candidates: list[dict]) -> tuple[str, float, bool]:
+    """Enforce minimal response contract for deep path textual responses."""
+    lowered = (answer or "").lower()
+    required_markers = ["summary", "differential", "red", "next", "follow-up"]
+    ok = all(m in lowered for m in required_markers)
+    insufficient = "insufficient" in lowered or "limited" in lowered
+    confidence = 0.6 if ok else 0.35
+    if ok:
+        return answer, confidence, insufficient
+    fallback = _render_data_only_fallback(encounter, candidates)
+    return fallback, 0.3, True
+
+
+def _next_question_prompt(encounter: dict) -> str:
+    context = _summarize_encounter_context(encounter)
+    return (
+        "You are generating exactly ONE next-best clinical follow-up question to narrow differential diagnosis.\n"
+        "Prioritize high information gain and safety.\n\n"
+        "Respond as plain text with a single question only.\n\n"
+        f"{context}"
+    )
+
+
+def _heuristic_next_question(encounter: dict) -> str:
+    """Fast deterministic fallback to avoid long-latency model calls."""
+    symptoms = [str(s.get("symptom", "")).lower() for s in encounter.get("symptoms", [])]
+    asked = " ".join((q.get("question") or "").lower() for q in encounter.get("qa_history", []))
+    candidates = [
+        ("fever", "What is the maximum recorded temperature, and has there been any rigors/chills?"),
+        ("headache", "Is there neck stiffness, photophobia, or confusion with the headache?"),
+        ("vomiting", "Is vomiting projectile or bilious, and can the patient keep fluids down?"),
+        ("chest pain", "Is the chest pain exertional, pleuritic, or reproducible on palpation?"),
+        ("shortness of breath", "What are the oxygen saturation and respiratory rate at rest?"),
+    ]
+    for trigger, question in candidates:
+        if trigger in symptoms and question.lower() not in asked:
+            return question
+    return "What symptom started first, and what has changed in severity over the last 24 hours?"
+
+
+@app.post("/encounters/start")
+def start_encounter(payload: EncounterStartRequest, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+    ensure_clinical_tables()
+    seed_graph_from_symptom_map()
+    req_payload = payload.model_dump(mode="json")
+    req_hash = hash_payload(req_payload)
+    if idempotency_key:
+        previous, conflict = fetch_idempotent_response("/encounters/start", idempotency_key, req_hash)
+        if conflict:
+            raise HTTPException(status_code=409, detail="Idempotency key reused with different payload")
+        if previous:
+            return previous
+    inp = EncounterInput(
+        age=payload.age,
+        sex=payload.sex,
+        known_conditions=payload.known_conditions,
+        medications=payload.medications,
+        allergies=payload.allergies,
+        history_summary=payload.history_summary,
+        symptoms=[s.model_dump() for s in payload.symptoms],
+    )
+    encounter_id = create_encounter_tx(inp)
+    response = {"encounter_id": encounter_id}
+    if idempotency_key:
+        store_idempotent_response("/encounters/start", idempotency_key, req_hash, response)
+    return response
+
+
+@app.post("/encounters/{encounter_id}/assess-fast")
+def assess_fast(encounter_id: str):
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
+    save_differential(
+        encounter_id,
+        iteration=1,
+        rows=candidates,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        source_snapshot_ts=snapshot_ts,
+    )
+
+    contract = _build_contract_from_candidates(encounter, candidates)
+    valid, missing = validate_contract(contract)
+    if not valid:
+        errors.extend([f"contract_missing:{x}" for x in missing])
+        contract = normalize_contract(contract)
+
+    answer = contract_to_markdown(contract)
+    append_audit_row(
+        encounter_id=encounter_id,
+        turn_no=0,
+        action="assess_fast",
+        provider="knowledge_graph_context",
+        model_name="none",
+        degraded_mode=degraded_mode,
+        context_text=_summarize_encounter_context(encounter),
+        output_text=answer,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        error_flags=errors,
+    )
+
+    return {
+        "encounter_id": encounter_id,
+        "provider_used": "knowledge_graph_context",
+        "degraded_mode": degraded_mode,
+        "errors": errors,
+        "contract": contract,
+        "top_candidates": candidates[:8],
+        "assessment": answer,
+        "kg_version": kg_version,
+        "kg_build_id": kg_build_id,
+    }
+
+
+@app.post("/encounters/{encounter_id}/assess-deep")
+def assess_deep(encounter_id: str):
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
+    save_differential(
+        encounter_id,
+        iteration=1,
+        rows=candidates,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        source_snapshot_ts=snapshot_ts,
+    )
+
+    prompt = _initial_assessment_prompt(encounter, candidates)
+    answer = cortex_complete(prompt)
+    provider = "cortex"
+    model_name = CORTEX_MODEL
+    if not _is_valid_cortex_answer(answer):
+        errors.append("cortex_unavailable")
+        degraded_mode = "no_llm"
+        answer = _render_data_only_fallback(encounter, candidates)
+        provider = "knowledge_graph_context"
+        model_name = "none"
+    else:
+        allowed = set()
+        literature = fetch_all_literature_context_hybrid(prompt, limit=20)
+        allowed |= set(re.findall(r"https?://[^\s\)]+", literature))
+        validated_answer, violations = validate_grounding(answer, allowed)
+        if violations:
+            errors.append(f"grounding_violations:{violations}")
+        answer, confidence, insufficient = _enforce_response_contract_markdown(validated_answer, encounter, candidates)
+        contract = _build_contract_from_candidates(encounter, candidates)
+        contract["summary"] = validated_answer.splitlines()[0] if validated_answer else contract["summary"]
+        contract["confidence"] = confidence
+        contract["insufficient_evidence"] = insufficient
+        contract = normalize_contract(contract)
+        valid, missing = validate_contract(contract)
+        if not valid:
+            errors.extend([f"contract_missing:{x}" for x in missing])
+    append_audit_row(
+        encounter_id=encounter_id,
+        turn_no=0,
+        action="assess_deep",
+        provider=provider,
+        model_name=model_name,
+        degraded_mode=degraded_mode,
+        context_text=_summarize_encounter_context(encounter),
+        output_text=answer,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        error_flags=errors,
+    )
+    return {
+        "encounter_id": encounter_id,
+        "provider_used": provider,
+        "degraded_mode": degraded_mode,
+        "errors": errors,
+        "top_candidates": candidates[:8],
+        "assessment": answer,
+        "kg_version": kg_version,
+        "kg_build_id": kg_build_id,
+    }
+
+
+@app.post("/encounters/{encounter_id}/initial-assessment")
+def initial_assessment(encounter_id: str):
+    # Compatibility wrapper
+    if CLINICAL_USE_CORTEX:
+        return assess_deep(encounter_id)
+    return assess_fast(encounter_id)
+
+
+@app.post("/encounters/{encounter_id}/next-question")
+def next_question(encounter_id: str):
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+
+    turn_no = next_turn_no(encounter_id)
+    question_text, policy_reason = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
+    if not question_text:
+        question_text = "What is the symptom timeline and which symptom started first?"
+
+    add_question(encounter_id, turn_no, question_text)
+    return {"encounter_id": encounter_id, "turn_no": turn_no, "question": question_text, "policy_reason": policy_reason}
+
+
+@app.post("/encounters/{encounter_id}/answer")
+def answer_question(
+    encounter_id: str,
+    payload: EncounterAnswerRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+
+    req_payload = {"encounter_id": encounter_id, **payload.model_dump(mode="json")}
+    req_hash = hash_payload(req_payload)
+    if idempotency_key:
+        previous, conflict = fetch_idempotent_response("/encounters/answer", idempotency_key, req_hash)
+        if conflict:
+            raise HTTPException(status_code=409, detail="Idempotency key reused with different payload")
+        if previous:
+            return previous
+
+    previous_candidates = encounter.get("differential", [])[:12]
+    updated = get_encounter(encounter_id)
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
+    answer_and_update_tx(
+        encounter_id=encounter_id,
+        turn_no=payload.turn_no,
+        answer_text=payload.answer,
+        candidates=candidates,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        source_snapshot_ts=snapshot_ts,
+    )
+    save_diff_delta(encounter_id, payload.turn_no, previous_candidates, candidates)
+    contract = _build_contract_from_candidates(updated or encounter, candidates, latest_answer=payload.answer)
+    answer = contract_to_markdown(contract)
+    provider = "knowledge_graph_context"
+    append_audit_row(
+        encounter_id=encounter_id,
+        turn_no=payload.turn_no,
+        action="answer",
+        provider=provider,
+        model_name="none",
+        degraded_mode=degraded_mode,
+        context_text=_summarize_encounter_context(updated or encounter),
+        output_text=answer,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        error_flags=errors,
+    )
+
+    response = {
+        "encounter_id": encounter_id,
+        "provider_used": provider,
+        "degraded_mode": degraded_mode,
+        "errors": errors,
+        "contract": contract,
+        "top_candidates": candidates[:8],
+        "assessment": answer,
+        "kg_version": kg_version,
+        "kg_build_id": kg_build_id,
+    }
+    if idempotency_key:
+        store_idempotent_response("/encounters/answer", idempotency_key, req_hash, response)
+    return response
+
+
+@app.get("/encounters/{encounter_id}/context")
+def encounter_context(encounter_id: str):
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    return {
+        "encounter_id": encounter_id,
+        "context_text": _summarize_encounter_context(encounter),
+        "structured_context": encounter,
+    }
 
 
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----

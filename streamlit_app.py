@@ -267,6 +267,42 @@ def ask_both(api_url: str, question: str, brief: bool) -> dict:
     }
 
 
+def api_start_encounter(api_url: str, payload: dict) -> str:
+    url = api_url.rstrip("/") + "/encounters/start"
+    r = requests.post(url, json=payload, timeout=120)
+    r.raise_for_status()
+    return r.json()["encounter_id"]
+
+
+def api_initial_assessment(api_url: str, encounter_id: str, mode: str = "fast") -> dict:
+    endpoint = "assess-deep" if mode == "deep" else "assess-fast"
+    url = api_url.rstrip("/") + f"/encounters/{encounter_id}/{endpoint}"
+    r = requests.post(url, timeout=180)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_next_question(api_url: str, encounter_id: str) -> dict:
+    url = api_url.rstrip("/") + f"/encounters/{encounter_id}/next-question"
+    r = requests.post(url, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_answer_question(api_url: str, encounter_id: str, turn_no: int, answer: str) -> dict:
+    url = api_url.rstrip("/") + f"/encounters/{encounter_id}/answer"
+    r = requests.post(url, json={"turn_no": turn_no, "answer": answer}, timeout=180)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_get_context(api_url: str, encounter_id: str) -> dict:
+    url = api_url.rstrip("/") + f"/encounters/{encounter_id}/context"
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
 def main() -> None:
     st.set_page_config(
         page_title="MedAssist.AI Doctor Console",
@@ -292,17 +328,43 @@ def main() -> None:
             sex = st.selectbox("Sex", ["Female", "Male", "Other / Not specified"])
         symptoms_pick = st.multiselect("Symptoms", COMMON_SYMPTOMS)
         symptoms_custom = st.text_input("Additional symptoms (comma separated)")
+        pre_existing_conditions = st.text_input("Pre-existing conditions (comma separated)")
         history = st.text_area("History and key exam findings", height=100)
+        medications = st.text_input("Current medications (comma separated)")
+        allergies = st.text_input("Allergies (comma separated)")
+        api_url = st.text_input("API URL", value="http://127.0.0.1:8000")
+        assessment_mode = st.selectbox("Assessment mode", ["fast", "deep"], index=0, help="Fast is deterministic/low-latency; Deep uses Cortex.")
         submitted = st.form_submit_button("Generate")
 
     if submitted:
         symptoms = sorted(set([s.lower() for s in symptoms_pick] + parse_custom_symptoms(symptoms_custom)))
+        encounter_payload = {
+            "age": int(age),
+            "sex": sex,
+            "known_conditions": parse_custom_symptoms(pre_existing_conditions),
+            "medications": parse_custom_symptoms(medications),
+            "allergies": parse_custom_symptoms(allergies),
+            "history_summary": history,
+            "symptoms": [{"symptom": s} for s in symptoms],
+        }
+        encounter_id = None
+        assessment = None
+        try:
+            encounter_id = api_start_encounter(api_url, encounter_payload)
+            assessment = api_initial_assessment(api_url, encounter_id, mode=assessment_mode)
+        except Exception as exc:
+            st.error(f"Encounter workflow API failed: {exc}")
         st.session_state["case"] = {
             "symptoms": symptoms,
             "case_text": build_case_text(age, sex, history, symptoms, "", "", ""),
             "red_flags": red_flags_for(symptoms, history),
             "local_dx": local_differentials(symptoms),
             "all_matches": query_rare_diseases(symptoms, max_rows=8)[0],
+            "api_url": api_url,
+            "encounter_id": encounter_id,
+            "encounter_assessment": assessment,
+            "latest_question": None,
+            "latest_turn_no": None,
         }
 
     if "case" not in st.session_state:
@@ -338,7 +400,7 @@ def main() -> None:
         st.write("No strict rare-disease matches.")
 
     with st.expander("AI-Powered Recommendations", expanded=True):
-        api_url = st.text_input("API URL", value="http://127.0.0.1:8000")
+        api_url = st.text_input("API URL", value=case.get("api_url", "http://127.0.0.1:8000"))
         ai_mode = st.radio(
             "AI Provider",
             ["Auto (Cortex → Gemini fallback)", "Cortex Only (MedRAG)", "Gemini Only", "Compare Both"],
@@ -392,6 +454,65 @@ def main() -> None:
                             st.warning("API returned an empty answer.")
                     except Exception as exc:
                         st.error(f"API call failed: {exc}")
+
+    with st.expander("Clinical Intake + Iterative Q&A (Snowflake + Cortex)", expanded=True):
+        encounter_id = case.get("encounter_id")
+        assessment = case.get("encounter_assessment")
+
+        if not encounter_id:
+            st.warning("Encounter session not created. Fill intake and click Generate.")
+        else:
+            st.write(f"**Encounter ID:** `{encounter_id}`")
+            if assessment:
+                st.write(f"**Provider:** `{assessment.get('provider_used') or assessment.get('provider')}`")
+                if assessment.get("degraded_mode"):
+                    st.write(f"**Degraded mode:** `{assessment.get('degraded_mode')}`")
+                st.markdown("### Initial Assessment")
+                st.markdown(assessment.get("assessment", ""))
+                top_candidates = assessment.get("top_candidates") or []
+                if top_candidates:
+                    st.markdown("### Ranked candidates")
+                    st.dataframe(top_candidates, use_container_width=True, hide_index=True)
+
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                if st.button("Generate next question"):
+                    try:
+                        nq = api_next_question(api_url, encounter_id)
+                        st.session_state["case"]["latest_question"] = nq.get("question")
+                        st.session_state["case"]["latest_turn_no"] = nq.get("turn_no")
+                    except Exception as exc:
+                        st.error(f"Failed to generate next question: {exc}")
+
+            latest_q = st.session_state["case"].get("latest_question")
+            latest_turn = st.session_state["case"].get("latest_turn_no")
+            if latest_q:
+                st.markdown(f"**Q{latest_turn}:** {latest_q}")
+                answer_text = st.text_area("Doctor answer", key=f"ans_{encounter_id}_{latest_turn}")
+                if st.button("Submit answer and update differential"):
+                    if not answer_text.strip():
+                        st.warning("Please enter an answer.")
+                    else:
+                        try:
+                            upd = api_answer_question(api_url, encounter_id, int(latest_turn), answer_text.strip())
+                            st.session_state["case"]["encounter_assessment"] = upd
+                            st.success("Updated assessment generated.")
+                            st.markdown(upd.get("assessment", ""))
+                            if upd.get("top_candidates"):
+                                st.dataframe(upd["top_candidates"], use_container_width=True, hide_index=True)
+                        except Exception as exc:
+                            st.error(f"Failed to submit answer: {exc}")
+
+            if st.button("Refresh full context"):
+                try:
+                    ctx = api_get_context(api_url, encounter_id)
+                    st.session_state["case"]["context_snapshot"] = ctx
+                except Exception as exc:
+                    st.error(f"Failed to fetch context: {exc}")
+
+            if st.session_state["case"].get("context_snapshot"):
+                with st.expander("Full persisted context", expanded=False):
+                    st.json(st.session_state["case"]["context_snapshot"])
 
     st.caption(
         "For clinical support only. This tool does not replace physician judgment, protocol-based care, or emergency escalation."
