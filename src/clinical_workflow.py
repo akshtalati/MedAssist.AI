@@ -8,7 +8,33 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from snowflake.connector.errors import ProgrammingError
+
 from .snowflake_client import get_connection
+
+
+def _add_column_if_missing(cur, table: str, col: str, col_type: str) -> None:
+    """Snowflake has no CREATE TABLE IF NOT EXISTS column; evolve old tables."""
+    try:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}")
+    except ProgrammingError as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "duplicate" in msg:
+            return
+        raise
+
+
+def _evolve_clinical_table_columns(cur) -> None:
+    diff = "CLINICAL.ENCOUNTER_DIFFERENTIAL"
+    _add_column_if_missing(cur, diff, "kg_version", "STRING")
+    _add_column_if_missing(cur, diff, "kg_build_id", "STRING")
+    _add_column_if_missing(cur, diff, "source_snapshot_ts", "TIMESTAMP_NTZ")
+    audit = "CLINICAL.ENCOUNTER_AUDIT"
+    _add_column_if_missing(cur, audit, "context_hash", "STRING")
+    _add_column_if_missing(cur, audit, "output_hash", "STRING")
+    _add_column_if_missing(cur, audit, "kg_version", "STRING")
+    _add_column_if_missing(cur, audit, "kg_build_id", "STRING")
+    _add_column_if_missing(cur, audit, "error_flags", "VARIANT")
 
 
 @dataclass
@@ -77,7 +103,6 @@ def ensure_clinical_tables() -> None:
               answered_at TIMESTAMP_NTZ
             )
             """,
-            "ALTER TABLE CLINICAL.ENCOUNTER_QA ADD CONSTRAINT IF NOT EXISTS uq_encounter_turn UNIQUE (encounter_id, turn_no)",
             """
             CREATE TABLE IF NOT EXISTS CLINICAL.ENCOUNTER_DIFFERENTIAL (
               encounter_id STRING,
@@ -181,6 +206,18 @@ def ensure_clinical_tables() -> None:
         ]
         for ddl in ddl_statements:
             cur.execute(ddl)
+        _evolve_clinical_table_columns(cur)
+        try:
+            cur.execute(
+                """
+                ALTER TABLE CLINICAL.ENCOUNTER_QA
+                ADD CONSTRAINT uq_encounter_turn UNIQUE (encounter_id, turn_no)
+                """
+            )
+        except ProgrammingError as e:
+            msg = str(e).lower()
+            if "already exists" not in msg and "duplicate" not in msg:
+                raise
     finally:
         cur.close()
         conn.close()
@@ -770,11 +807,12 @@ def append_audit_row(
     conn = get_connection()
     cur = conn.cursor()
     try:
+        # Use INSERT...SELECT so PARSE_JSON is not in a VALUES clause (Snowflake rejects PARSE_JSON in VALUES).
         cur.execute(
             """
             INSERT INTO CLINICAL.ENCOUNTER_AUDIT
               (encounter_id, turn_no, action, provider, model_name, degraded_mode, context_hash, output_hash, kg_version, kg_build_id, error_flags)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s))
+            SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s)
             """,
             (
                 encounter_id,

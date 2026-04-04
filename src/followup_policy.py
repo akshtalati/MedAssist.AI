@@ -7,27 +7,91 @@ from typing import Any
 
 MAX_TURNS_DEFAULT = 5
 
-
+# Ordered: symptom keyword in encounter → one focused clinical question (avoid duplicates via asked_text).
 QUESTION_RULES = [
-    ("fever", "What is the highest recorded temperature and any rigors/chills?"),
-    ("headache", "Any neck stiffness, photophobia, confusion, or focal neurologic deficits?"),
-    ("vomiting", "Is vomiting bilious/projectile and can oral intake be maintained?"),
-    ("chest pain", "Is chest pain exertional, pleuritic, or associated with diaphoresis?"),
-    ("shortness of breath", "What are current oxygen saturation and respiratory rate?"),
+    ("fever", "What is the highest documented temperature, and have there been rigors, night sweats, or focal infection symptoms?"),
+    ("headache", "Is there neck stiffness, photophobia, confusion, focal weakness, or a thunderclap onset?"),
+    ("vomiting", "Is emesis bilious or bloody, and is the patient tolerating oral fluids?"),
+    ("nausea", "Any associated abdominal pain, recent medications or toxins, and can they keep fluids down?"),
+    ("chest pain", "Is the pain pleuritic, exertional, or pressure-like, and are there associated diaphoresis or radiation?"),
+    ("shortness of breath", "What are the current SpO₂ and respiratory rate at rest, and any orthopnea or pleuritic pain?"),
+    ("abdominal pain", "Where is the pain localized, is peritoneal irritation suggested, and any obstipation or melena?"),
+    ("seizure", "Was there witnessed tonic-clonic activity, postictal confusion, tongue bite, or first-ever seizure at this age?"),
+    ("cough", "Is the cough productive, any hemoptysis, and duration acute vs subacute vs chronic?"),
+    ("rash", "Describe morphology and distribution, pruritus, mucosal involvement, and recent new drugs or exposures?"),
+    ("fatigue", "Is fatigue acute vs chronic, any weight loss, night sweats, or bleeding to suggest malignancy or anemia?"),
+    ("dizziness", "Is vertigo true spinning vs presyncope, and any focal neuro signs or recent otologic symptoms?"),
+    ("vision changes", "Monocular vs binocular, sudden vs gradual, and any eye pain or neurologic deficits?"),
+    ("confusion", "Acute change from baseline, attention deficits, infection exposure, toxins, or metabolic triggers?"),
+    ("joint pain", "Pattern (mono vs poly), symmetry, morning stiffness, and any recent infection or travel?"),
+    ("diarrhea", "Stool frequency, blood or mucus, recent antibiotics, travel, or sick contacts?"),
+    ("syncope", "Prodrome, exertional trigger, cardiac history, and any injury from the fall?"),
+    ("palpitations", "Regular vs irregular, sustained episodes, associated chest pain or syncope?"),
 ]
+
+
+def _latest_differential_rows(differential: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not differential:
+        return []
+    iterations = [int(d.get("iteration") or 0) for d in differential]
+    max_it = max(iterations)
+    rows = [d for d in differential if int(d.get("iteration") or 0) == max_it]
+    rows.sort(key=lambda x: int(x.get("rank_no") or 999))
+    return rows
+
+
+def _already_asked(asked_blob: str, question: str) -> bool:
+    """Rough dedupe: avoid repeating the same intent if a similar question was asked."""
+    qn = (question or "").lower().strip()
+    if len(qn) < 12:
+        return qn in asked_blob
+    # First sentence / clause often enough to detect repeat
+    head = qn[: min(120, len(qn))]
+    return head in asked_blob
 
 
 def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT) -> tuple[str, str]:
     qa_history = encounter.get("qa_history", [])
     if len(qa_history) >= max_turns:
-        return "No further follow-up questions: max turns reached.", "max_turns"
+        return "Maximum follow-up turns reached for this encounter. Summarize and consider disposition or further workup.", "max_turns"
 
     symptoms = [str(s.get("symptom", "")).lower() for s in encounter.get("symptoms", [])]
     asked_text = " ".join((q.get("question") or "").lower() for q in qa_history)
+
     for trigger, question in QUESTION_RULES:
-        if trigger in symptoms and question.lower() not in asked_text:
+        if trigger in symptoms and not _already_asked(asked_text, question):
             return question, "information_gain_rule"
-    return "What symptom started first, and how has severity changed over time?", "default"
+
+    diff_rows = _latest_differential_rows(encounter.get("differential") or [])
+    names: list[str] = []
+    for row in diff_rows:
+        name = row.get("disease_name")
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= 3:
+            break
+
+    if len(names) >= 2:
+        q = (
+            f'Between “{names[0]}” and “{names[1]}” (from the current ranked differentials), '
+            "what single history detail, vital sign, or focused exam finding would most help discriminate?"
+        )
+        if not _already_asked(asked_text, q):
+            return q, "differential_narrowing"
+
+    if len(names) == 1:
+        q = (
+            f'For the leading consideration “{names[0]}”, what critical data is still missing '
+            "(timeline, exposures, vitals, medications, pregnancy status, or targeted exam) that would change management?"
+        )
+        if not _already_asked(asked_text, q):
+            return q, "differential_narrowing"
+
+    return (
+        "In one minute: which symptom began first, how has severity changed over the last 24–48 hours, "
+        "and what is the patient’s baseline functional status?",
+        "default",
+    )
 
 
 def safety_rails(encounter: dict[str, Any], confidence: float) -> dict[str, list[str] | str]:
