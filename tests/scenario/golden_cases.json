@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "fever_vomiting",
+      "expected_top": ["Meningococcal meningitis", "PFAPA syndrome", "TRAPS", "Hyperimmunoglobulinemia D", "Cyclic neutropenia"],
+      "actual_top": ["PFAPA syndrome", "Meningococcal meningitis", "Hyperimmunoglobulinemia D", "TRAPS", "Cyclic neutropenia"],
+      "k": 5,
+      "min_overlap": 0.6
+    },
+    {
+      "id": "headache_vision",
+      "expected_top": ["Temporal arteritis", "Intracranial bleed", "Migraine with aura"],
+      "actual_top": ["Migraine with aura", "Temporal arteritis", "Idiopathic intracranial hypertension"],
+      "k": 3,
+      "min_overlap": 0.5
+    }
+  ]
+}
