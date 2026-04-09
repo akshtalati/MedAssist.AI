@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MedAssist.AI — Clinical Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --elevated: #21262d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-dim: #388bfd66;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --border: #30363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1.5rem 3rem; }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+    }
+    header p { margin: 0.35rem 0 0; font-size: 0.9rem; color: var(--muted); }
+    .grid {
+      display: grid;
+      gap: 1.25rem;
+    }
+    @media (min-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr 1fr; align-items: start; }
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.1rem 1.25rem;
+    }
+    .card h2 {
+      margin: 0 0 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    label.lbl { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--elevated);
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; }
+    .row > * { flex: 1; min-width: 140px; }
+    .symptom-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 1rem;
+      margin: 0.5rem 0 0.75rem;
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 0.25rem 0;
+    }
+    .symptom-grid label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .symptom-grid input { accent-color: var(--accent); }
+    button {
+      padding: 0.55rem 1.1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #0d1117; }
+    .btn-secondary { background: var(--elevated); color: var(--text); border: 1px solid var(--border); }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+    .status {
+      font-size: 0.85rem;
+      margin-top: 0.65rem;
+      min-height: 1.2em;
+    }
+    .status.loading { color: var(--accent); }
+    .status.err { color: var(--danger); }
+    .status.ok { color: var(--success); }
+    .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
+    .badge {
+      font-size: 0.72rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .badge strong { color: var(--text); font-weight: 600; }
+    .md { font-size: 0.92rem; }
+    .md h1, .md h2, .md h3 { font-size: 1.05rem; margin: 0.9rem 0 0.5rem; }
+    .md p { margin: 0.45rem 0; }
+    .md ul { padding-left: 1.2rem; }
+    .md a { color: var(--accent); }
+    table.candidates {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-top: 0.5rem;
+    }
+    table.candidates th, table.candidates td {
+      border: 1px solid var(--border);
+      padding: 0.45rem 0.55rem;
+      text-align: left;
+    }
+    table.candidates th { background: var(--elevated); color: var(--muted); font-weight: 600; }
+    .follow-q {
+      background: var(--elevated);
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.95rem;
+      margin: 0.5rem 0;
+    }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .hidden { display: none !important; }
+    #panelResults.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>MedAssist.AI — Clinical console</h1>
+      <p>
+        Patient intake → knowledge-graph ranking (with fallback) → structured assessment → targeted follow-up questions.
+        Served from the same host as the API (<code id="apiOrigin"></code>).
+      </p>
+      <p class="muted" style="margin-top:0.85rem;padding:0.65rem 0.75rem;background:var(--elevated);border-radius:8px;border:1px solid var(--border);">
+        <strong>Primary UI</strong> is Streamlit at <strong>http://127.0.0.1:8501</strong> when you run <code>./scripts/start_presentation.sh</code>.
+        Opening the API root (<code>/</code>) redirects there. This page remains available at <strong>/legacy</strong>.
+      </p>
+    </header>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>Patient intake</h2>
+        <div class="row">
+          <div>
+            <label class="lbl">Age</label>
+            <input type="number" id="age" min="0" max="120" value="42" />
+          </div>
+          <div>
+            <label class="lbl">Sex</label>
+            <select id="sex">
+              <option>Female</option>
+              <option>Male</option>
+              <option>Other / Not specified</option>
+            </select>
+          </div>
+        </div>
+        <label class="lbl" style="margin-top:0.75rem">Symptoms (check all that apply)</label>
+        <div class="symptom-grid" id="symptomChecks"></div>
+        <label class="lbl">Additional symptoms (comma-separated)</label>
+        <input type="text" id="symptomsExtra" placeholder="e.g. neck stiffness, photophobia" />
+        <label class="lbl" style="margin-top:0.65rem">History &amp; key findings</label>
+        <textarea id="history" placeholder="Onset, course, relevant negatives, exam…"></textarea>
+        <div class="row" style="margin-top:0.65rem">
+          <div>
+            <label class="lbl">Known conditions</label>
+            <input type="text" id="conditions" placeholder="comma-separated" />
+          </div>
+          <div>
+            <label class="lbl">Medications</label>
+            <input type="text" id="medications" placeholder="comma-separated" />
+          </div>
+          <div>
+            <label class="lbl">Allergies</label>
+            <input type="text" id="allergies" placeholder="comma-separated" />
+          </div>
+        </div>
+        <label class="lbl" style="margin-top:0.65rem">Assessment mode</label>
+        <select id="assessMode">
+          <option value="fast">Fast — KG + structured contract (low latency)</option>
+          <option value="deep">Deep — Cortex narrative + grounding checks (slower)</option>
+        </select>
+        <div class="btn-row">
+          <button type="button" class="btn-primary" id="btnStart">Start encounter &amp; run assessment</button>
+        </div>
+        <div class="status" id="statusIntake"></div>
+      </div>
+
+      <div class="card hidden" id="panelResults">
+        <h2>Assessment</h2>
+        <div class="badges" id="badges"></div>
+        <div class="md" id="assessmentMd"></div>
+        <h2 style="margin-top:1rem">Ranked candidates</h2>
+        <div id="candidatesWrap"></div>
+
+        <h2 style="margin-top:1.25rem">Follow-up</h2>
+        <p class="muted">Questions are generated from clinical rules and your stored differential to mimic a real handoff.</p>
+        <div class="btn-row">
+          <button type="button" class="btn-secondary" id="btnNextQ">Get next question</button>
+        </div>
+        <div id="followBlock" class="hidden">
+          <div class="follow-q" id="followQuestionText"></div>
+          <label class="lbl">Your answer</label>
+          <textarea id="followAnswer" placeholder="Structured reply (vitals, timeline, exam, tests…)"></textarea>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="btnSubmitFollow">Submit answer &amp; update differential</button>
+          </div>
+        </div>
+        <div class="status" id="statusFollow"></div>
+
+        <div class="btn-row" style="margin-top:1rem">
+          <button type="button" class="btn-secondary" id="btnContext">Refresh saved context</button>
+        </div>
+        <pre id="contextDump" class="hidden muted" style="font-size:0.75rem; overflow:auto; max-height:220px; background:var(--elevated); padding:0.75rem; border-radius:8px;"></pre>
+      </div>
+    </div>
+
+    <footer>
+      For clinical decision support only — not a substitute for professional judgment, local protocols, or emergency care.
+    </footer>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    document.getElementById('apiOrigin').textContent = API_BASE;
+
+    const COMMON_SYMPTOMS = [
+      'fever', 'vomiting', 'nausea', 'headache', 'abdominal pain', 'chest pain',
+      'shortness of breath', 'fatigue', 'cough', 'diarrhea', 'seizure', 'rash',
+      'vision changes', 'dizziness', 'confusion', 'palpitations', 'syncope', 'joint pain'
+    ];
+
+    const symptomChecks = document.getElementById('symptomChecks');
+    COMMON_SYMPTOMS.forEach((s) => {
+      const id = 'sym_' + s.replace(/\s+/g, '_');
+      const lab = document.createElement('label');
+      lab.innerHTML = '<input type="checkbox" value="' + s + '" id="' + id + '" /> ' + s;
+      symptomChecks.appendChild(lab);
+    });
+
+    let encounterId = null;
+    let latestTurnNo = null;
+
+    function setStatus(el, msg, cls) {
+      el.textContent = msg || '';
+      el.className = 'status ' + (cls || '');
+    }
+
+    function parseList(str) {
+      return (str || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+    }
+
+    function buildSymptomsPayload() {
+      const picked = Array.from(symptomChecks.querySelectorAll('input:checked')).map((x) => x.value);
+      const extra = parseList(document.getElementById('symptomsExtra').value);
+      const all = Array.from(new Set(picked.concat(extra).map((s) => s.toLowerCase())));
+      return all.map((symptom) => ({ symptom }));
+    }
+
+    function renderMarkdown(el, md) {
+      if (!md) {
+        el.innerHTML = '';
+        return;
+      }
+      marked.setOptions({ gfm: true });
+      el.innerHTML = marked.parse(md);
+    }
+
+    function renderCandidates(rows) {
+      const w = document.getElementById('candidatesWrap');
+      if (!rows || !rows.length) {
+        w.innerHTML = '<p class="muted">No rows returned (check KG / symptom map and Snowflake data).</p>';
+        return;
+      }
+      const keys = Object.keys(rows[0]).filter((k) => rows[0][k] !== null && rows[0][k] !== undefined);
+      let html = '<table class="candidates"><thead><tr>';
+      keys.forEach((k) => {
+        html += '<th>' + k + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+      rows.slice(0, 12).forEach((row) => {
+        html += '<tr>';
+        keys.forEach((k) => {
+          const v = row[k];
+          html += '<td>' + (typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      w.innerHTML = html;
+    }
+
+    function showAssessment(data) {
+      document.getElementById('panelResults').classList.remove('hidden');
+      const badges = document.getElementById('badges');
+      badges.innerHTML = '';
+      function addBadge(label, val) {
+        if (val === undefined || val === null || val === '') return;
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.innerHTML = label + ': <strong>' + String(val) + '</strong>';
+        badges.appendChild(b);
+      }
+      addBadge('Encounter', data.encounter_id || encounterId);
+      addBadge('Provider', data.provider_used);
+      addBadge('Degraded', data.degraded_mode);
+      addBadge('KG', (data.kg_version || '') + (data.kg_build_id ? ' / ' + data.kg_build_id : ''));
+      if (data.errors && data.errors.length) {
+        const e = document.createElement('span');
+        e.className = 'badge';
+        e.style.borderColor = 'var(--warning)';
+        e.innerHTML = 'Flags: <strong>' + data.errors.length + '</strong>';
+        badges.appendChild(e);
+      }
+      renderMarkdown(document.getElementById('assessmentMd'), data.assessment || '');
+      renderCandidates(data.top_candidates || []);
+    }
+
+    async function post(path, body) {
+      const r = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const text = await r.text();
+      if (!r.ok) throw new Error(text || r.statusText);
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+
+    document.getElementById('btnStart').addEventListener('click', async () => {
+      const st = document.getElementById('statusIntake');
+      setStatus(st, 'Creating encounter…', 'loading');
+      document.getElementById('followBlock').classList.add('hidden');
+      latestTurnNo = null;
+
+      const payload = {
+        age: parseInt(document.getElementById('age').value, 10) || null,
+        sex: document.getElementById('sex').value,
+        known_conditions: parseList(document.getElementById('conditions').value),
+        medications: parseList(document.getElementById('medications').value),
+        allergies: parseList(document.getElementById('allergies').value),
+        history_summary: document.getElementById('history').value.trim(),
+        symptoms: buildSymptomsPayload(),
+      };
+
+      if (!payload.symptoms.length) {
+        setStatus(st, 'Select or enter at least one symptom.', 'err');
+        return;
+      }
+
+      try {
+        const start = await post('/encounters/start', payload);
+        encounterId = start.encounter_id;
+        const mode = document.getElementById('assessMode').value;
+        const path =
+          mode === 'deep'
+            ? '/encounters/' + encodeURIComponent(encounterId) + '/assess-deep'
+            : '/encounters/' + encodeURIComponent(encounterId) + '/assess-fast';
+        setStatus(st, 'Running assessment…', 'loading');
+        const assessment = await post(path, {});
+        showAssessment(assessment);
+        setStatus(st, 'Encounter ready. Use follow-up when needed.', 'ok');
+      } catch (e) {
+        setStatus(st, String(e.message || e), 'err');
+      }
+    });
+
+    document.getElementById('btnNextQ').addEventListener('click', async () => {
+      const st = document.getElementById('statusFollow');
+      if (!encounterId) {
+        setStatus(st, 'Start an encounter first.', 'err');
+        return;
+      }
+      setStatus(st, 'Requesting next question…', 'loading');
+      try {
+        const nq = await post('/encounters/' + encodeURIComponent(encounterId) + '/next-question', {});
+        latestTurnNo = nq.turn_no;
+        document.getElementById('followQuestionText').textContent = nq.question || '';
+        document.getElementById('followAnswer').value = '';
+        document.getElementById('followBlock').classList.remove('hidden');
+        setStatus(st, (nq.policy_reason ? 'Reason: ' + nq.policy_reason : 'Question ready.'), 'ok');
+      } catch (e) {
+        setStatus(st, String(e.message || e), 'err');
+      }
+    });
+
+    document.getElementById('btnSubmitFollow').addEventListener('click', async () => {
+      const st = document.getElementById('statusFollow');
+      if (!encounterId || latestTurnNo == null) {
+        setStatus(st, 'Get a question first.', 'err');
+        return;
+      }
+      const ans = document.getElementById('followAnswer').value.trim();
+      if (!ans) {
+        setStatus(st, 'Enter an answer.', 'err');
+        return;
+      }
+      setStatus(st, 'Updating assessment…', 'loading');
+      try {
+        const upd = await post('/encounters/' + encodeURIComponent(encounterId) + '/answer', {
+          turn_no: latestTurnNo,
+          answer: ans,
+        });
+        showAssessment(upd);
+        document.getElementById('followBlock').classList.add('hidden');
+        latestTurnNo = null;
+        setStatus(st, 'Differential updated.', 'ok');
+      } catch (e) {
+        setStatus(st, String(e.message || e), 'err');
+      }
+    });
+
+    document.getElementById('btnContext').addEventListener('click', async () => {
+      const dump = document.getElementById('contextDump');
+      if (!encounterId) return;
+      try {
+        const r = await fetch(API_BASE + '/encounters/' + encodeURIComponent(encounterId) + '/context');
+        const text = await r.text();
+        if (!r.ok) throw new Error(text);
+        dump.textContent = JSON.stringify(JSON.parse(text), null, 2);
+        dump.classList.remove('hidden');
+      } catch (e) {
+        dump.textContent = String(e.message || e);
+        dump.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>

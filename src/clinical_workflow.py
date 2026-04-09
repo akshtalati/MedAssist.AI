@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -594,18 +595,20 @@ def get_encounter(encounter_id: str) -> dict[str, Any] | None:
             }
             for i, r, dn, dc, sc, rs, src in cur.fetchall()
         ]
-        return {
-            "encounter_id": encounter_id,
-            "age": row[0],
-            "sex": row[1],
-            "known_conditions": _to_list(row[2]),
-            "medications": _to_list(row[3]),
-            "allergies": _to_list(row[4]),
-            "history_summary": row[5] or "",
-            "symptoms": symptoms,
-            "qa_history": qa,
-            "differential": differential,
-        }
+        return normalize_encounter_dict(
+            {
+                "encounter_id": encounter_id,
+                "age": row[0],
+                "sex": row[1],
+                "known_conditions": _to_list(row[2]),
+                "medications": _to_list(row[3]),
+                "allergies": _to_list(row[4]),
+                "history_summary": row[5] or "",
+                "symptoms": symptoms,
+                "qa_history": qa,
+                "differential": differential,
+            }
+        )
     finally:
         cur.close()
         conn.close()
@@ -710,6 +713,102 @@ def rank_diseases_from_symptom_map(encounter_id: str, limit: int = 12) -> list[d
     ]
 
 
+_STOP = frozenset(
+    "that with from this have been weeks days years month months patient history noted "
+    "reports states presents denies without acute chronic severe mild moderate".split()
+)
+
+
+def extract_encounter_search_tokens(encounter: dict[str, Any], max_tokens: int = 12) -> list[str]:
+    """Terms from history, conditions, meds, allergies for broadened map search (not only chief symptoms)."""
+    parts: list[str] = []
+    parts.append(str(encounter.get("history_summary") or ""))
+    for key in ("known_conditions", "medications", "allergies"):
+        for x in encounter.get(key) or []:
+            parts.append(str(x))
+    blob = " ".join(parts).lower()
+    words = re.findall(r"[a-z][a-z0-9]{3,}", blob)
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in words:
+        if w in _STOP or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+        if len(out) >= max_tokens:
+            break
+    return out
+
+
+def merge_candidate_rankings(*lists: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+    """Merge ranked disease lists by (name, code); keep highest score, add partial scores from extras."""
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for lst in lists:
+        for c in lst or []:
+            dn = str(c.get("disease_name") or "").strip()
+            dc = str(c.get("disease_code") or "").strip()
+            if not dn:
+                continue
+            key = (dn, dc)
+            sc = float(c.get("score") or 0.0)
+            if key not in by_key:
+                by_key[key] = dict(c)
+            else:
+                by_key[key]["score"] = max(float(by_key[key].get("score") or 0), sc)
+                src = by_key[key].get("source", "")
+                if c.get("source") and c["source"] not in src:
+                    by_key[key]["source"] = f"{src}+{c['source']}" if src else c["source"]
+    out = sorted(by_key.values(), key=lambda x: -float(x.get("score") or 0.0))
+    return out[:limit]
+
+
+def rank_diseases_from_context_tokens(encounter: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:
+    """Use medications, conditions, allergies, and history text to find extra rows in SYMPTOM_DISEASE_MAP."""
+    tokens = extract_encounter_search_tokens(encounter, max_tokens=10)
+    if not tokens:
+        return []
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        conditions_sql: list[str] = []
+        params: list[Any] = []
+        for _ in tokens:
+            conditions_sql.append("(LOWER(m.symptom) LIKE %s OR LOWER(m.disease_name) LIKE %s)")
+            params.extend(["%{}%".format(t), "%{}%".format(t)])
+        where = " OR ".join(conditions_sql)
+        cur.execute(
+            f"""
+            SELECT
+              m.disease_name,
+              COALESCE(m.orpha_code, '') AS disease_code,
+              COUNT(*)::FLOAT AS matched
+            FROM NORMALIZED.SYMPTOM_DISEASE_MAP m
+            WHERE {where}
+            GROUP BY m.disease_name, COALESCE(m.orpha_code, '')
+            ORDER BY matched DESC, m.disease_name
+            LIMIT %s
+            """,
+            (*params, limit),
+        )
+        rows = cur.fetchall()
+    except Exception:
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+    return [
+        {
+            "disease_name": dn,
+            "disease_code": dc,
+            "score": max(0.25, float(matched or 0.0) * 0.2),
+            "rationale": f"Context/history token match in map: {int(matched or 0)}",
+            "source": "symptom_map_context",
+        }
+        for dn, dc, matched in (rows or [])
+    ]
+
+
 def get_latest_kg_build_meta() -> tuple[str, str, str | None]:
     conn = get_connection()
     cur = conn.cursor()
@@ -731,6 +830,78 @@ def get_latest_kg_build_meta() -> tuple[str, str, str | None]:
     finally:
         cur.close()
         conn.close()
+
+
+def get_encounter_kg_preview(
+    encounter_id: str,
+    *,
+    max_edges: int = 2500,
+) -> dict[str, Any]:
+    """
+    Return all HAS_SYMPTOM edges from this encounter's symptoms to diseases in the KG
+    (no artificial cap on distinct diseases). Rows are limited only by max_edges for safety.
+    """
+    kg_version, kg_build_id, _snap = get_latest_kg_build_meta()
+    max_edges = max(1, min(int(max_edges), 5000))
+
+    rows: list[Any] = []
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            WITH symptom_nodes AS (
+              SELECT DISTINCT
+                'SYM:' || SHA2(LOWER(TRIM(symptom)), 256) AS sym_node,
+                LOWER(TRIM(symptom)) AS symptom_text
+              FROM CLINICAL.ENCOUNTER_SYMPTOMS
+              WHERE encounter_id = %s
+            )
+            SELECT
+              dn.node_label AS disease_name,
+              COALESCE(sn.node_label, s.symptom_text) AS symptom_label
+            FROM symptom_nodes s
+            JOIN KNOWLEDGE_GRAPH.KG_EDGES e
+              ON e.to_node_id = s.sym_node
+             AND e.edge_type = 'HAS_SYMPTOM'
+            JOIN KNOWLEDGE_GRAPH.KG_NODES dn
+              ON dn.node_id = e.from_node_id
+             AND dn.node_type = 'DISEASE'
+            LEFT JOIN KNOWLEDGE_GRAPH.KG_NODES sn
+              ON sn.node_id = e.to_node_id
+             AND sn.node_type = 'SYMPTOM'
+            ORDER BY dn.node_label, symptom_label
+            LIMIT %s
+            """,
+            (encounter_id, max_edges),
+        )
+        rows = cur.fetchall() or []
+    except Exception:
+        return {
+            "encounter_id": encounter_id,
+            "edges": [],
+            "distinct_diseases": 0,
+            "kg_version": kg_version,
+            "kg_build_id": kg_build_id,
+            "truncated": False,
+            "note": "Knowledge graph query unavailable or tables empty.",
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+    edges = [{"disease": str(d or ""), "symptom": str(s or "")} for d, s in rows]
+    distinct_diseases = len({e["disease"] for e in edges if e.get("disease")})
+    truncated = len(rows) >= max_edges
+    return {
+        "encounter_id": encounter_id,
+        "edges": edges,
+        "distinct_diseases": distinct_diseases,
+        "kg_version": kg_version,
+        "kg_build_id": kg_build_id,
+        "truncated": truncated,
+        "max_edges": max_edges,
+    }
 
 
 def store_idempotent_response(endpoint: str, idem_key: str, request_hash: str, response: dict[str, Any]) -> None:
@@ -869,11 +1040,57 @@ def _json_array(values: list[str]) -> str:
 
 
 def _to_list(value: Any) -> list[str]:
+    """
+    Normalize Snowflake ARRAY / Python list / JSON string into a clean list of strings.
+    Must not iterate a str with list(s) — e.g. list('[]') -> ['[', ']'] which joins to '[, ]'.
+    """
     if value is None:
         return []
     if isinstance(value, list):
-        return [str(v) for v in value]
+        return [str(v).strip() for v in value if v is not None and str(v).strip()]
+    if isinstance(value, str):
+        s = value.strip()
+        if not s or s in ("[]", "null", "{}"):
+            return []
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(v).strip() for v in parsed if v is not None and str(v).strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return [s] if s else []
+    if isinstance(value, (dict,)):
+        return []
     try:
-        return [str(v) for v in list(value)]
+        return [str(v).strip() for v in list(value) if v is not None and str(v).strip()]
     except Exception:
-        return [str(value)]
+        out = str(value).strip()
+        return [out] if out else []
+
+
+def normalize_encounter_dict(enc: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize encounter payloads from DB or JSON (fixes stringified arrays and junk rows)."""
+    out = dict(enc)
+    for k in ("known_conditions", "medications", "allergies"):
+        if k in out:
+            out[k] = _to_list(out.get(k))
+    sy = out.get("symptoms")
+    if isinstance(sy, list):
+        clean: list[dict[str, Any]] = []
+        for item in sy:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("symptom") or "").strip()
+            if not name:
+                continue
+            clean.append(
+                {
+                    "symptom": name,
+                    "onset": item.get("onset"),
+                    "severity": item.get("severity"),
+                    "duration": item.get("duration"),
+                }
+            )
+        out["symptoms"] = clean
+    return out

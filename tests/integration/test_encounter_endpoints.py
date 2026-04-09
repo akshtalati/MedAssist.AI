@@ -24,7 +24,7 @@ def test_assess_fast_returns_contract_and_metadata(monkeypatch):
     monkeypatch.setattr(
         main,
         "_attempt_rank_with_degradation",
-        lambda encounter_id, limit=12: (
+        lambda encounter_id, encounter=None, limit=12: (
             [{"disease_name": "Disease A", "disease_code": "ORPHA:1", "score": 1.0, "rationale": "test", "source": "knowledge_graph"}],
             "none",
             [],
@@ -33,6 +33,14 @@ def test_assess_fast_returns_contract_and_metadata(monkeypatch):
     monkeypatch.setattr(main, "get_latest_kg_build_meta", lambda: ("v1", "b1", None))
     monkeypatch.setattr(main, "save_differential", lambda *a, **k: None)
     monkeypatch.setattr(main, "append_audit_row", lambda **k: None)
+    monkeypatch.setattr(
+        main,
+        "retrieve_evidence_journal_first",
+        lambda question, limit=30: (
+            [{"source": "pubmed", "title": "A", "url": "https://pubmed.ncbi.nlm.nih.gov/1/", "text": "x"}],
+            "journal_first",
+        ),
+    )
     client = TestClient(main.app)
     res = client.post("/encounters/enc-1/assess-fast")
     assert res.status_code == 200
@@ -40,6 +48,9 @@ def test_assess_fast_returns_contract_and_metadata(monkeypatch):
     assert body["provider_used"] == "knowledge_graph_context"
     assert "contract" in body
     assert "degraded_mode" in body
+    assert "evidence_summary" in body
+    assert "evidence_sources" in body
+    assert body["fallback_mode"] == "journal_first"
 
 
 def test_idempotent_start_replay(monkeypatch):
@@ -54,4 +65,24 @@ def test_idempotent_start_replay(monkeypatch):
     )
     assert res.status_code == 200
     assert res.json()["encounter_id"] == "replayed"
+
+
+def test_ask_returns_evidence_and_fallback_mode(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "retrieve_evidence_journal_first",
+        lambda question, limit=30: (
+            [{"source": "pubmed", "title": "Study", "url": "https://pubmed.ncbi.nlm.nih.gov/2/", "text": "snippet"}],
+            "web_assisted",
+        ),
+    )
+    monkeypatch.setattr(main, "fetch_symptom_disease_context", lambda question, limit=50: "")
+    monkeypatch.setattr(main, "cortex_complete", lambda prompt: "### Summary\nok")
+    client = TestClient(main.app)
+    res = client.post("/ask", json={"question": "fever and headache", "brief": False})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["provider"] == "cortex"
+    assert body["fallback_mode"] == "web_assisted"
+    assert isinstance(body.get("evidence_sources"), list)
 

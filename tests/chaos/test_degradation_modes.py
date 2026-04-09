@@ -21,7 +21,7 @@ def test_deep_path_falls_back_when_cortex_fails(monkeypatch):
     monkeypatch.setattr(
         main,
         "_attempt_rank_with_degradation",
-        lambda encounter_id, limit=12: (
+        lambda encounter_id, encounter=None, limit=12: (
             [{"disease_name": "A", "disease_code": "", "score": 1.0, "rationale": "r", "source": "kg"}],
             "none",
             [],
@@ -31,10 +31,16 @@ def test_deep_path_falls_back_when_cortex_fails(monkeypatch):
     monkeypatch.setattr(main, "save_differential", lambda *a, **k: None)
     monkeypatch.setattr(main, "cortex_complete", lambda prompt: "[Cortex error: timeout]")
     monkeypatch.setattr(main, "append_audit_row", lambda **k: None)
+    monkeypatch.setattr(
+        main,
+        "retrieve_evidence_journal_first",
+        lambda question, limit=30: ([], "insufficient"),
+    )
     client = TestClient(main.app)
     res = client.post("/encounters/enc-chaos/assess-deep")
     assert res.status_code == 200
     body = res.json()
     assert body["degraded_mode"] == "no_llm"
     assert body["provider_used"] == "knowledge_graph_context"
+    assert body["fallback_mode"] == "insufficient"
 

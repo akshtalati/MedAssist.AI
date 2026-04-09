@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import os
-from pathlib import Path
 import json
+import time
+from urllib.parse import quote_plus
 
 from google import genai
 from google.genai import types
 import re
+import requests
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -26,9 +28,13 @@ from src.clinical_workflow import (
     ensure_clinical_tables,
     fetch_idempotent_response,
     get_encounter,
+    get_encounter_kg_preview,
+    normalize_encounter_dict,
     get_latest_kg_build_meta,
     hash_payload,
+    merge_candidate_rankings,
     next_turn_no,
+    rank_diseases_from_context_tokens,
     rank_diseases_from_symptom_map,
     rank_diseases_from_graph,
     save_differential,
@@ -39,6 +45,28 @@ from src.clinical_workflow import (
 from src.followup_policy import MAX_TURNS_DEFAULT, next_question as policy_next_question, safety_rails
 from src.grounding import extract_urls_from_context, validate_grounding
 from src.response_contract import contract_to_markdown, normalize_contract, validate_contract
+
+# region agent log
+_API_DEBUG_LOG = "/Users/akshtalati/Desktop/genai/MedAssist.AI/.cursor/debug-0a57e9.log"
+
+
+def _api_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "0a57e9",
+            "timestamp": int(time.time() * 1000),
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+        }
+        with open(_API_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+
+
+# endregion
 
 # RAG (ChromaDB) - optional; falls back to ILIKE if unavailable
 try:
@@ -90,17 +118,14 @@ CLINICAL_MAX_TURNS = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFA
 
 app = FastAPI(title="MedAssist.AI API")
 
-# Frontend: serve static UI at /
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+# Primary UX is Streamlit (full console). Override with STREAMLIT_PUBLIC_URL if needed.
+STREAMLIT_PUBLIC_URL = os.environ.get("STREAMLIT_PUBLIC_URL", "http://127.0.0.1:8501")
 
 
 @app.get("/")
 def index():
-    """Serve the MedAssist.AI web UI."""
-    index_path = STATIC_DIR / "index.html"
-    if not index_path.exists():
-        raise HTTPException(status_code=404, detail="Static frontend not found")
-    return FileResponse(index_path)
+    """Redirect to the Streamlit doctor console (single UI)."""
+    return RedirectResponse(url=STREAMLIT_PUBLIC_URL, status_code=302)
 
 
 class Question(BaseModel):
@@ -416,19 +441,235 @@ def _format_literature_context(entries: list[dict]) -> str:
     return "\n---\n\n".join(parts)
 
 
+def _normalize_evidence_entries(entries: list[dict], *, mode: str) -> list[dict]:
+    out: list[dict] = []
+    for e in entries:
+        out.append(
+            {
+                "source": (e.get("source") or "unknown").strip(),
+                "title": (e.get("title") or "").strip()[:500],
+                "url": (e.get("url") or "").strip(),
+                "snippet": (e.get("text") or "").strip()[:500],
+                "mode": mode,
+            }
+        )
+    return out
+
+
+def _is_evidence_sufficient(entries: list[dict], *, min_items: int = 3, min_with_url: int = 2) -> bool:
+    if len(entries) < min_items:
+        return False
+    with_url = sum(1 for e in entries if (e.get("url") or "").strip())
+    return with_url >= min_with_url
+
+
+def _fetch_web_entries(question: str, limit: int = 8) -> list[dict]:
+    """
+    Lightweight web-assisted fallback using DuckDuckGo HTML endpoint.
+    This is used only when journal-first evidence is insufficient.
+    """
+    q = (question or "").strip()
+    if not q:
+        return []
+    try:
+        # Bias towards medical/journal content with explicit query hint.
+        url = f"https://duckduckgo.com/html/?q={quote_plus(q + ' site:ncbi.nlm.nih.gov OR site:who.int OR site:nih.gov')}"
+        resp = requests.get(
+            url,
+            timeout=10,
+            headers={"User-Agent": "MedAssistAI/1.0 (clinical-evidence-retrieval)"},
+        )
+        resp.raise_for_status()
+        html = resp.text
+    except Exception:
+        return []
+
+    # Extract coarse result links and titles from HTML blocks.
+    matches = re.findall(
+        r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    out: list[dict] = []
+    for href, title_html in matches[: limit * 3]:
+        title = re.sub(r"<[^>]+>", "", title_html or "").strip()
+        if not href or not title:
+            continue
+        source = "web"
+        lhref = href.lower()
+        if "pubmed.ncbi.nlm.nih.gov" in lhref:
+            source = "pubmed_web"
+        elif "ncbi.nlm.nih.gov/pmc" in lhref:
+            source = "pmc_web"
+        elif "who.int" in lhref:
+            source = "who_web"
+        elif "nih.gov" in lhref:
+            source = "nih_web"
+        out.append({"source": source, "title": title[:500], "url": href, "text": ""})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _fetch_live_pubmed_entries(question: str, limit: int = 8) -> list[dict]:
+    """Live PubMed retrieval via NCBI E-utilities (JSON endpoints)."""
+    q = (question or "").strip()
+    if not q:
+        return []
+    try:
+        esearch = requests.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+            params={"db": "pubmed", "retmode": "json", "retmax": str(limit), "sort": "relevance", "term": q},
+            timeout=10,
+        )
+        esearch.raise_for_status()
+        ids = (esearch.json().get("esearchresult") or {}).get("idlist") or []
+        if not ids:
+            return []
+        esummary = requests.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+            params={"db": "pubmed", "retmode": "json", "id": ",".join(ids[:limit])},
+            timeout=10,
+        )
+        esummary.raise_for_status()
+        result = (esummary.json() or {}).get("result") or {}
+    except Exception:
+        return []
+
+    rows: list[dict] = []
+    for pmid in ids[:limit]:
+        node = result.get(str(pmid)) or {}
+        title = (node.get("title") or "").strip()
+        if not title:
+            continue
+        rows.append(
+            {
+                "source": "pubmed_live",
+                "title": title[:500],
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "text": (node.get("source") or "")[:250],
+            }
+        )
+    return rows
+
+
+def _fetch_europe_pmc_entries(question: str, limit: int = 8) -> list[dict]:
+    """Live medical literature fallback from Europe PMC."""
+    q = (question or "").strip()
+    if not q:
+        return []
+    try:
+        resp = requests.get(
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+            params={"query": q, "format": "json", "pageSize": str(limit)},
+            timeout=12,
+        )
+        resp.raise_for_status()
+        data = resp.json() or {}
+    except Exception:
+        return []
+    out: list[dict] = []
+    items = ((data.get("resultList") or {}).get("result")) or []
+    for it in items[:limit]:
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        pmid = (it.get("pmid") or "").strip()
+        pmcid = (it.get("pmcid") or "").strip()
+        if pmid:
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        elif pmcid:
+            url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/"
+        else:
+            url = (it.get("doi") and f"https://doi.org/{it.get('doi')}") or ""
+        out.append(
+            {
+                "source": "europe_pmc_live",
+                "title": title[:500],
+                "url": url,
+                "text": (it.get("journalTitle") or "")[:250],
+            }
+        )
+    return out
+
+
+_SOURCE_QUALITY_WEIGHTS = {
+    "pubmed": 1.0,
+    "pubmed_live": 1.0,
+    "pmc": 0.95,
+    "pmc_web": 0.95,
+    "europe_pmc_live": 0.9,
+    "orphanet": 0.95,
+    "ncbi_bookshelf": 0.85,
+    "nih_web": 0.85,
+    "who_web": 0.85,
+    "openstax": 0.6,
+    "web": 0.35,
+}
+
+
+def _evaluate_evidence_quality(entries: list[dict]) -> dict:
+    if not entries:
+        return {"score": 0.0, "trusted_count": 0, "count": 0, "sufficient": False}
+    score = 0.0
+    trusted_count = 0
+    for e in entries:
+        src = (e.get("source") or "web").strip().lower()
+        w = _SOURCE_QUALITY_WEIGHTS.get(src, 0.35)
+        if w >= 0.85:
+            trusted_count += 1
+        score += w
+    count = len(entries)
+    avg = score / max(1, count)
+    # Require enough items and enough trusted medical sources.
+    sufficient = count >= 3 and trusted_count >= 2 and avg >= 0.7
+    return {
+        "score": round(avg, 3),
+        "trusted_count": trusted_count,
+        "count": count,
+        "sufficient": sufficient,
+    }
+
+
+def retrieve_evidence_journal_first(question: str, *, limit: int = 30) -> tuple[list[dict], str]:
+    """
+    Returns (entries, fallback_mode).
+    fallback_mode:
+      - journal_first: literature evidence was sufficient
+      - web_assisted: journal evidence insufficient, web fallback merged in
+      - insufficient: still weak after fallback
+    """
+    rag_entries = _fetch_rag_entries(question, limit=15)
+    ilike_entries: list[dict] = []
+    if len(rag_entries) < 5:
+        ilike_entries = _fetch_ilike_entries(question, limit=limit)
+    journal_entries = _merge_and_dedupe_literature(rag_entries, ilike_entries)
+    if _is_evidence_sufficient(journal_entries):
+        return journal_entries[:limit], "journal_first"
+
+    live_pubmed = _fetch_live_pubmed_entries(question, limit=min(10, limit))
+    combined = _merge_and_dedupe_literature(journal_entries, live_pubmed)
+    if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        return combined[:limit], "web_assisted"
+
+    europe_pmc = _fetch_europe_pmc_entries(question, limit=min(10, limit))
+    combined = _merge_and_dedupe_literature(combined, europe_pmc)
+    if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        return combined[:limit], "web_assisted"
+
+    web_entries = _fetch_web_entries(question, limit=min(8, limit))
+    combined = _merge_and_dedupe_literature(combined, web_entries)
+    if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        return combined[:limit], "web_assisted"
+    return combined[:limit], "insufficient"
+
+
 def fetch_all_literature_context_hybrid(question: str, limit: int = 30) -> str:
     """
     Hybrid retrieval: try RAG (ChromaDB) first, fall back to ILIKE (Snowflake) if few results.
     Merge and deduplicate, then return formatted context for the LLM.
     """
-    RAG_MIN_RESULTS = 5  # If RAG returns fewer, use ILIKE too
-
-    rag_entries = _fetch_rag_entries(question, limit=15)
-    ilike_entries: list[dict] = []
-    if len(rag_entries) < RAG_MIN_RESULTS:
-        ilike_entries = _fetch_ilike_entries(question, limit=limit)
-
-    merged = _merge_and_dedupe_literature(rag_entries, ilike_entries)
+    merged, _mode = retrieve_evidence_journal_first(question, limit=limit)
     return _format_literature_context(merged)
 
 
@@ -753,14 +994,47 @@ def _is_valid_cortex_answer(answer: str) -> bool:
     )
 
 
+def _short_evidence_summary(entries: list[dict], *, fallback_mode: str) -> str:
+    if not entries:
+        return f"No grounded evidence found (mode: {fallback_mode})."
+    sources = sorted({(e.get("source") or "unknown") for e in entries})
+    return (
+        f"Evidence mode: {fallback_mode}. "
+        f"Retrieved {len(entries)} items across {len(sources)} source type(s): {', '.join(sources[:5])}."
+    )
+
+
+def _build_differential_evidence_query(encounter: dict, candidates: list[dict]) -> str:
+    symptoms = [str(s.get("symptom", "")).strip() for s in (encounter.get("symptoms") or []) if s.get("symptom")]
+    top_diseases = [str(c.get("disease_name", "")).strip() for c in (candidates or [])[:5] if c.get("disease_name")]
+    history = (encounter.get("history_summary") or "").strip()
+    known_conditions = [str(x).strip() for x in (encounter.get("known_conditions") or []) if str(x).strip()]
+    medications = [str(x).strip() for x in (encounter.get("medications") or []) if str(x).strip()]
+    allergies = [str(x).strip() for x in (encounter.get("allergies") or []) if str(x).strip()]
+    parts = []
+    if symptoms:
+        parts.append("symptoms: " + ", ".join(symptoms[:8]))
+    if top_diseases:
+        parts.append("top differential: " + ", ".join(top_diseases))
+    if history:
+        parts.append("history: " + history[:180])
+    if known_conditions:
+        parts.append("known conditions: " + ", ".join(known_conditions[:8]))
+    if medications:
+        parts.append("medications: " + ", ".join(medications[:8]))
+    if allergies:
+        parts.append("allergies: " + ", ".join(allergies[:8]))
+    return "; ".join(parts) or "clinical differential evidence"
+
+
 @app.post("/ask")
 def ask(question: Question):
     """
     Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
     and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
     """
-    # 1) Hybrid: RAG (ChromaDB) first, ILIKE (Snowflake) fallback when few results; merge & dedupe
-    literature = fetch_all_literature_context_hybrid(question.question, limit=30)
+    evidence_entries, fallback_mode = retrieve_evidence_journal_first(question.question, limit=30)
+    literature = _format_literature_context(evidence_entries)
     # 2) Add symptom → rare-disease matches when the question looks like symptoms
     symptom_block = fetch_symptom_disease_context(question.question, limit=50)
 
@@ -775,9 +1049,40 @@ def ask(question: Question):
     )
 
     # Default provider chain: Cortex first, Gemini fallback.
+    evidence_sources = _normalize_evidence_entries(evidence_entries[:6], mode=fallback_mode)
+    evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
+    evidence_quality = _evaluate_evidence_quality(evidence_entries)
+    if (fallback_mode == "insufficient") or (not evidence_quality.get("sufficient", False)):
+        followups = [
+            "Can you add key exam findings and symptom timeline?",
+            "Any high-risk comorbidities, active medications, or contraindications?",
+            "What immediate red-flag vitals/labs/imaging are available?",
+        ]
+        return {
+            "answer": (
+                "Insufficient high-quality evidence for a reliable answer right now. "
+                "Please provide additional clinical details; re-querying will improve grounded output."
+            ),
+            "provider": "none",
+            "fallback_mode": "insufficient",
+            "evidence_summary": evidence_summary,
+            "evidence_sources": evidence_sources,
+            "evidence_quality": evidence_quality,
+            "insufficient_evidence": True,
+            "follow_up_questions": followups,
+        }
+
     answer_cortex = cortex_complete(prompt)
     if _is_valid_cortex_answer(answer_cortex):
-        return {"answer": answer_cortex, "provider": "cortex"}
+        return {
+            "answer": answer_cortex,
+            "provider": "cortex",
+            "fallback_mode": fallback_mode,
+            "evidence_summary": evidence_summary,
+            "evidence_sources": evidence_sources,
+            "evidence_quality": evidence_quality,
+            "insufficient_evidence": False,
+        }
 
     answer_gemini = _generate_with_gemini(prompt)
     return {
@@ -785,6 +1090,11 @@ def ask(question: Question):
         "provider": "gemini",
         "fallback_from": "cortex",
         "cortex_error": answer_cortex,
+        "fallback_mode": fallback_mode,
+        "evidence_summary": evidence_summary,
+        "evidence_sources": evidence_sources,
+        "evidence_quality": evidence_quality,
+        "insufficient_evidence": False,
     }
 
 
@@ -829,6 +1139,7 @@ def ask_cortex(question: Question):
 
 
 def _summarize_encounter_context(encounter: dict) -> str:
+    encounter = normalize_encounter_dict(encounter)
     symptoms = encounter.get("symptoms", [])
     symptom_lines = []
     for s in symptoms:
@@ -873,20 +1184,62 @@ def _initial_assessment_prompt(encounter: dict, candidates: list[dict]) -> str:
     )
 
 
-def _build_contract_from_candidates(encounter: dict, candidates: list[dict], *, latest_answer: str | None = None) -> dict:
-    symptoms = ", ".join(s.get("symptom", "") for s in encounter.get("symptoms", [])) or "none"
-    profile = f"Symptoms currently tracked: {symptoms}"
+def _encounter_narrative_for_contract(encounter: dict, *, latest_answer: str | None = None) -> str:
+    """Full intake narrative for structured assessment (not symptoms-only)."""
+    sy_lines = []
+    for s in encounter.get("symptoms") or []:
+        sy_lines.append(
+            f"{s.get('symptom') or '?'} "
+            f"(onset={s.get('onset') or '—'}, severity={s.get('severity') or '—'}, duration={s.get('duration') or '—'})"
+        )
+    symptoms_block = "; ".join(sy_lines) if sy_lines else "None recorded"
+    kc = ", ".join(encounter.get("known_conditions") or []) or "None"
+    meds = ", ".join(encounter.get("medications") or []) or "None"
+    alle = ", ".join(encounter.get("allergies") or []) or "None"
+    parts = [
+        f"Age {encounter.get('age')}, {encounter.get('sex') or 'sex unknown'}.",
+        f"Known conditions: {kc}.",
+        f"Medications: {meds}.",
+        f"Allergies: {alle}.",
+        f"History / exam summary: {encounter.get('history_summary') or 'None'}.",
+        f"Symptoms (with attributes): {symptoms_block}.",
+    ]
     if latest_answer:
-        profile += f". Latest clinician input: {latest_answer}"
+        parts.append(f"Latest clinician follow-up response: {latest_answer}")
+    return " ".join(parts)
+
+
+def _chart_context_line(encounter: dict, max_len: int = 220) -> str:
+    """Short line for follow-up questions: meds + conditions + history snippet."""
+    bits: list[str] = []
+    m = encounter.get("medications") or []
+    if m:
+        bits.append("Meds: " + ", ".join(str(x) for x in m[:6]))
+    k = encounter.get("known_conditions") or []
+    if k:
+        bits.append("Conditions: " + ", ".join(str(x) for x in k[:5]))
+    a = encounter.get("allergies") or []
+    if a:
+        bits.append("Allergies: " + ", ".join(str(x) for x in a[:4]))
+    h = (encounter.get("history_summary") or "").strip()
+    if h:
+        bits.append("History: " + h[: max(0, max_len - sum(len(x) for x in bits) - 20)])
+    s = " | ".join(bits)
+    return s[:max_len]
+
+
+def _build_contract_from_candidates(encounter: dict, candidates: list[dict], *, latest_answer: str | None = None) -> dict:
+    summary = _encounter_narrative_for_contract(encounter, latest_answer=latest_answer)
     rails = safety_rails(encounter, confidence=0.45 if candidates else 0.2)
     payload = {
-        "summary": profile,
+        "summary": summary,
         "differential": candidates[:8],
         "red_flags": rails["red_flags"],
         "next_steps": [
+            "Cross-check current medications and contraceptives against the differential (e.g. secondary causes, drug effects).",
             "Reassess vitals and red flags after each new symptom update.",
-            "Order targeted tests based on top candidates and symptom chronology.",
-            "Continue structured follow-up questions to reduce uncertainty.",
+            "Order targeted tests based on top candidates, full history, and medication context.",
+            "Continue structured follow-up; incorporate conditions, allergies, and social history into decisions.",
         ],
         "follow_up_questions": [],
         "confidence": 0.65 if candidates else 0.25,
@@ -897,19 +1250,60 @@ def _build_contract_from_candidates(encounter: dict, candidates: list[dict], *, 
     return normalize_contract(payload)
 
 
-def _attempt_rank_with_degradation(encounter_id: str, limit: int = 12) -> tuple[list[dict], str, list[str]]:
+def _attempt_rank_with_degradation(
+    encounter_id: str,
+    encounter: dict | None = None,
+    limit: int = 12,
+) -> tuple[list[dict], str, list[str]]:
+    """Combine KG ranking, symptom-map matching, and history/medication token hits.
+
+    KG stays primary when available; fallback/context results are additive.
+    """
     errors: list[str] = []
+    enc = encounter or get_encounter(encounter_id)
+    ranked: list[dict] = []
+    kg_ranked: list[dict] = []
+    degraded = "none"
     try:
-        ranked = rank_diseases_from_graph(encounter_id, limit=limit)
-        return ranked, "none", errors
+        kg_ranked = rank_diseases_from_graph(encounter_id, limit=limit)
+        ranked = list(kg_ranked)
     except Exception as exc:
         errors.append(f"kg_unavailable:{exc}")
+        degraded = "symptom_map_only"
+    if not ranked:
         try:
             ranked = rank_diseases_from_symptom_map(encounter_id, limit=limit)
-            return ranked, "symptom_map_only", errors
         except Exception as exc2:
             errors.append(f"symptom_map_unavailable:{exc2}")
-            return [], "no_ranker", errors
+    if enc:
+        try:
+            ctx_rank = rank_diseases_from_context_tokens(enc, limit=min(12, limit))
+            ranked = merge_candidate_rankings(ranked, ctx_rank, limit=limit)
+        except Exception as exc3:
+            errors.append(f"context_rank_unavailable:{exc3}")
+    # Keep KG-origin candidates first so the displayed differential remains KG-led.
+    if kg_ranked:
+        kg_keys = {
+            (
+                str(x.get("disease_name") or "").strip().lower(),
+                str(x.get("disease_code") or "").strip().lower(),
+            )
+            for x in kg_ranked
+        }
+        kg_first = list(kg_ranked)
+        for row in ranked:
+            key = (
+                str(row.get("disease_name") or "").strip().lower(),
+                str(row.get("disease_code") or "").strip().lower(),
+            )
+            if key not in kg_keys:
+                kg_first.append(row)
+        ranked = kg_first[:limit]
+    if not ranked:
+        degraded = "no_ranker"
+    elif degraded == "none" and errors:
+        pass
+    return ranked, degraded, errors
 
 
 def _render_data_only_fallback(encounter: dict, candidates: list[dict], latest_answer: str | None = None) -> str:
@@ -996,7 +1390,7 @@ def assess_fast(encounter_id: str):
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
 
-    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, encounter=encounter, limit=12)
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
     save_differential(
         encounter_id,
@@ -1014,6 +1408,10 @@ def assess_fast(encounter_id: str):
         contract = normalize_contract(contract)
 
     answer = contract_to_markdown(contract)
+    evidence_query = _build_differential_evidence_query(encounter, candidates)
+    evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
+    evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
+    evidence_sources = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
     append_audit_row(
         encounter_id=encounter_id,
         turn_no=0,
@@ -1027,6 +1425,19 @@ def assess_fast(encounter_id: str):
         kg_build_id=kg_build_id,
         error_flags=errors,
     )
+    # region agent log
+    _api_debug_log(
+        "H3",
+        "api:assess_fast",
+        "rank_result",
+        {
+            "encounter_id": encounter_id,
+            "n_encounter_symptoms": len(encounter.get("symptoms") or []),
+            "n_candidates": len(candidates),
+            "degraded_mode": degraded_mode,
+        },
+    )
+    # endregion
 
     return {
         "encounter_id": encounter_id,
@@ -1038,6 +1449,9 @@ def assess_fast(encounter_id: str):
         "assessment": answer,
         "kg_version": kg_version,
         "kg_build_id": kg_build_id,
+        "evidence_summary": evidence_summary,
+        "evidence_sources": evidence_sources,
+        "fallback_mode": fallback_mode,
     }
 
 
@@ -1048,7 +1462,7 @@ def assess_deep(encounter_id: str):
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
 
-    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, encounter=encounter, limit=12)
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
     save_differential(
         encounter_id,
@@ -1098,6 +1512,10 @@ def assess_deep(encounter_id: str):
         kg_build_id=kg_build_id,
         error_flags=errors,
     )
+    evidence_query = _build_differential_evidence_query(encounter, candidates)
+    evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
+    evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
+    evidence_sources = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
     return {
         "encounter_id": encounter_id,
         "provider_used": provider,
@@ -1107,6 +1525,9 @@ def assess_deep(encounter_id: str):
         "assessment": answer,
         "kg_version": kg_version,
         "kg_build_id": kg_build_id,
+        "evidence_summary": evidence_summary,
+        "evidence_sources": evidence_sources,
+        "fallback_mode": fallback_mode,
     }
 
 
@@ -1129,7 +1550,6 @@ def next_question(encounter_id: str):
     question_text, policy_reason = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
     if not question_text:
         question_text = "What is the symptom timeline and which symptom started first?"
-
     add_question(encounter_id, turn_no, question_text)
     return {"encounter_id": encounter_id, "turn_no": turn_no, "question": question_text, "policy_reason": policy_reason}
 
@@ -1156,7 +1576,9 @@ def answer_question(
 
     previous_candidates = encounter.get("differential", [])[:12]
     updated = get_encounter(encounter_id)
-    candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, limit=12)
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(
+        encounter_id, encounter=updated or encounter, limit=12
+    )
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
     answer_and_update_tx(
         encounter_id=encounter_id,
@@ -1196,6 +1618,11 @@ def answer_question(
         "kg_version": kg_version,
         "kg_build_id": kg_build_id,
     }
+    evidence_query = _build_differential_evidence_query(updated or encounter, candidates)
+    evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
+    response["evidence_summary"] = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
+    response["evidence_sources"] = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
+    response["fallback_mode"] = fallback_mode
     if idempotency_key:
         store_idempotent_response("/encounters/answer", idempotency_key, req_hash, response)
     return response
@@ -1207,11 +1634,47 @@ def encounter_context(encounter_id: str):
     encounter = get_encounter(encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
+    # region agent log
+    _api_debug_log(
+        "H2",
+        "api:encounter_context",
+        "structured_shape",
+        {
+            "encounter_id": encounter_id,
+            "n_symptoms": len(encounter.get("symptoms") or []),
+            "n_conditions": len(encounter.get("known_conditions") or []),
+        },
+    )
+    # endregion
     return {
         "encounter_id": encounter_id,
         "context_text": _summarize_encounter_context(encounter),
         "structured_context": encounter,
     }
+
+
+@app.get("/encounters/{encounter_id}/kg-preview")
+def encounter_kg_preview(
+    encounter_id: str,
+    max_edges: int = Query(2500, ge=1, le=5000, description="Safety cap on rows; all matching diseases included up to this limit"),
+):
+    """All HAS_SYMPTOM disease–symptom pairs for this encounter’s symptoms (bounded by max_edges)."""
+    ensure_clinical_tables()
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    # region agent log
+    _api_debug_log(
+        "H4",
+        "api:kg_preview",
+        "before_kg_query",
+        {
+            "encounter_id": encounter_id,
+            "n_encounter_symptoms": len(encounter.get("symptoms") or []),
+        },
+    )
+    # endregion
+    return get_encounter_kg_preview(encounter_id, max_edges=max_edges)
 
 
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----

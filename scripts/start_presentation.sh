@@ -29,11 +29,31 @@ else
   fi
 fi
 export MEDASSIST_API_BASE="http://${HOST}:${CHOSEN}"
+export STREAMLIT_PUBLIC_URL="http://${HOST}:8501"
+
+cleanup() {
+  if [[ -n "${UVICORN_PID:-}" ]]; then
+    kill "$UVICORN_PID" 2>/dev/null || true
+    wait "$UVICORN_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Starting API + UI (first start may take 10–30s while imports load)."
-echo " Wait for: Uvicorn running on http://${HOST}:${CHOSEN}"
-echo " UI:    ${MEDASSIST_API_BASE}/"
+echo " API + OpenAPI: ${MEDASSIST_API_BASE}  |  GET ${MEDASSIST_API_BASE}/ → redirects to Streamlit"
+echo " Starting Uvicorn in the background, then Streamlit (single doctor UI)."
+echo " Open: ${STREAMLIT_PUBLIC_URL}  (full console: KG, assessments, follow-up)"
 echo " Copy:  export MEDASSIST_API_BASE=${MEDASSIST_API_BASE}"
 echo " Smoke: MEDASSIST_API_BASE=${MEDASSIST_API_BASE} ./scripts/smoke_presentation.sh"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-exec "$PY" -m uvicorn api.main:app --host "$HOST" --port "$CHOSEN"
+
+"$PY" -m uvicorn api.main:app --host "$HOST" --port "$CHOSEN" &
+UVICORN_PID=$!
+# Brief wait so Streamlit’s first API calls succeed
+sleep 2
+
+# Doctor console: Streamlit (must match features in streamlit_app.py)
+"$PY" -m streamlit run "$ROOT/streamlit_app.py" \
+  --server.port 8501 \
+  --server.address "$HOST" \
+  --browser.gatherUsageStats false

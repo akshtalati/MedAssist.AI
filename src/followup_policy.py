@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-MAX_TURNS_DEFAULT = 5
+MAX_TURNS_DEFAULT = 25
 
 # Ordered: symptom keyword in encounter → one focused clinical question (avoid duplicates via asked_text).
 QUESTION_RULES = [
@@ -96,6 +96,8 @@ def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT)
 
 def safety_rails(encounter: dict[str, Any], confidence: float) -> dict[str, list[str] | str]:
     symptoms = " ".join(str(s.get("symptom", "")).lower() for s in encounter.get("symptoms", []))
+    meds_l = " ".join(str(m).lower() for m in (encounter.get("medications") or []))
+    hist_l = (encounter.get("history_summary") or "").lower()
     red_flags: list[str] = []
     if "chest pain" in symptoms:
         red_flags.append("Rule out acute coronary syndrome, pulmonary embolism, and aortic syndromes urgently.")
@@ -103,6 +105,11 @@ def safety_rails(encounter: dict[str, Any], confidence: float) -> dict[str, list
         red_flags.append("Assess oxygenation and work of breathing immediately.")
     if "confusion" in symptoms or "seizure" in symptoms:
         red_flags.append("Consider urgent neurologic and metabolic evaluation.")
+    if "headache" in symptoms and ("contracept" in meds_l or "oral contrace" in hist_l or "ocp" in meds_l):
+        red_flags.append(
+            "Headache in a patient on estrogen-containing contraceptives: consider venous sinus thrombosis / "
+            "IIH-related differentials and urgent evaluation when papilledema or focal signs are present."
+        )
 
     contraindications: list[str] = []
     allergies = [a.lower() for a in (encounter.get("allergies") or [])]
