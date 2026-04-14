@@ -26,13 +26,23 @@ The API root **`GET /`** redirects to Streamlit (`STREAMLIT_PUBLIC_URL`, default
 - **Doctor UI:** `http://127.0.0.1:8501`
 - **API + OpenAPI:** `http://127.0.0.1:8000` and `http://127.0.0.1:8000/docs`
 
+**Observability:** Prometheus metrics at [`http://127.0.0.1:8000/metrics`](http://127.0.0.1:8000/metrics) (when `prometheus-fastapi-instrumentator` loads). Optional **MLflow** via `MLFLOW_TRACKING_URI` (default `file:./mlruns`); set `MLFLOW_DISABLE=1` to turn off. **Analytics:** dbt marts over `CLINICAL.ENCOUNTER_AUDIT.pipeline_metrics` — see `dbt/models/marts/`.
+
+**Docker (API + Streamlit + Prometheus + Grafana):** `docker compose up` from the repo root (expects `.env`). Optional **Airflow** (demo): `docker compose --profile full up`.
+
+**Evals:** `python evals/run_evals.py --base-url http://127.0.0.1:8000` (fixtures in `evals/fixtures/synthetic_cases.json`). Pytest: `pytest evals` (integration needs `RUN_EVAL_API=1` and a running API).
+
+**Agentic assess (parallel path):** `POST /encounters/{id}/assess-agentic` — same payload shape as assess-fast plus `agent_trace` and `agent_provider` (LangGraph wrapper in `src/agentic/assessment_graph.py`).
+
+**Follow-up self-critique (optional):** `FOLLOWUP_SELF_CRITIQUE=1` runs a short Cortex/Gemini check on the proposed next question and may substitute one alternative from the policy queue.
+
 ---
 
 ## Implemented features (summary)
 
 ### Differential & knowledge graph
 
-- **Encounter lifecycle:** `POST /encounters/start` → `assess-fast` (default path from UI) persists differential and audit metadata.
+- **Encounter lifecycle:** `POST /encounters/start` → `assess-fast` (default path from UI) persists differential and audit metadata; optional `assess-agentic` for LangGraph-wrapped parity experiments.
 - **Ranking:** `rank_diseases_from_graph` (join encounter symptoms to `HAS_SYMPTOM` edges) with fallbacks to `SYMPTOM_DISEASE_MAP` and context-token augmentation; **KG candidates stay first** when the graph returns results.
 - **Graph seeding:** `seed_graph_from_symptom_map()` keeps `KNOWLEDGE_GRAPH` aligned with `NORMALIZED.SYMPTOM_DISEASE_MAP`.
 - **Response contract:** Structured `contract` JSON + markdown assessment via [`src/response_contract.py`](src/response_contract.py); safety rails in [`src/followup_policy.py`](src/followup_policy.py).

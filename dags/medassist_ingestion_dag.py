@@ -54,3 +54,6 @@ with DAG(
     )
 
     fetch_checkpointed >> cleanup_duplicates >> build_symptom_index
+
+# After Snowflake load is automated, chain `medassist_warehouse` (dbt) or add a trigger here.
+# See dags/medassist_warehouse_dag.py and dags/medassist_eval_dag.py.

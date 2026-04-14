@@ -50,7 +50,27 @@ def _already_asked(asked_blob: str, question: str) -> bool:
     return head in asked_blob
 
 
-def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT) -> tuple[str, str]:
+def _matches_skip(question: str, skip_questions: tuple[str, ...]) -> bool:
+    qn = (question or "").strip().lower()
+    if not qn or not skip_questions:
+        return False
+    for sk in skip_questions:
+        sn = (sk or "").strip().lower()
+        if not sn:
+            continue
+        if qn == sn:
+            return True
+        head = 72
+        if len(sn) >= 12 and (qn[:head] == sn[:head] or sn[:head] in qn or qn[:head] in sn):
+            return True
+    return False
+
+
+def next_question(
+    encounter: dict[str, Any],
+    max_turns: int = MAX_TURNS_DEFAULT,
+    skip_questions: tuple[str, ...] = (),
+) -> tuple[str, str]:
     qa_history = encounter.get("qa_history", [])
     if len(qa_history) >= max_turns:
         return "Maximum follow-up turns reached for this encounter. Summarize and consider disposition or further workup.", "max_turns"
@@ -60,7 +80,8 @@ def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT)
 
     for trigger, question in QUESTION_RULES:
         if trigger in symptoms and not _already_asked(asked_text, question):
-            return question, "information_gain_rule"
+            if not _matches_skip(question, skip_questions):
+                return question, "information_gain_rule"
 
     diff_rows = _latest_differential_rows(encounter.get("differential") or [])
     names: list[str] = []
@@ -76,7 +97,7 @@ def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT)
             f'Between “{names[0]}” and “{names[1]}” (from the current ranked differentials), '
             "what single history detail, vital sign, or focused exam finding would most help discriminate?"
         )
-        if not _already_asked(asked_text, q):
+        if not _already_asked(asked_text, q) and not _matches_skip(q, skip_questions):
             return q, "differential_narrowing"
 
     if len(names) == 1:
@@ -84,13 +105,19 @@ def next_question(encounter: dict[str, Any], max_turns: int = MAX_TURNS_DEFAULT)
             f'For the leading consideration “{names[0]}”, what critical data is still missing '
             "(timeline, exposures, vitals, medications, pregnancy status, or targeted exam) that would change management?"
         )
-        if not _already_asked(asked_text, q):
+        if not _already_asked(asked_text, q) and not _matches_skip(q, skip_questions):
             return q, "differential_narrowing"
 
-    return (
+    default_q = (
         "In one minute: which symptom began first, how has severity changed over the last 24–48 hours, "
-        "and what is the patient’s baseline functional status?",
-        "default",
+        "and what is the patient’s baseline functional status?"
+    )
+    if not _matches_skip(default_q, skip_questions):
+        return default_q, "default"
+
+    return (
+        "What are the patient’s current vital signs, and have there been any new neuro, chest, or abdominal red flags since intake?",
+        "default_after_skip",
     )
 
 
