@@ -45,6 +45,8 @@ from src.clinical_workflow import (
 from src.followup_policy import MAX_TURNS_DEFAULT, next_question as policy_next_question, safety_rails
 from src.grounding import extract_urls_from_context, validate_grounding
 from src.response_contract import contract_to_markdown, normalize_contract, validate_contract
+from src.mlflow_telemetry import log_assessment_metrics
+from src.agentic.assessment_graph import build_assess_graph
 
 # region agent log
 _API_DEBUG_LOG = "/Users/akshtalati/Desktop/genai/MedAssist.AI/.cursor/debug-0a57e9.log"
@@ -115,8 +117,16 @@ if not VERTEX_AI_DATASTORE_PATH and os.environ.get("VERTEX_AI_DATASTORE_ID"):
 
 CLINICAL_USE_CORTEX = os.environ.get("CLINICAL_USE_CORTEX", "0") == "1"
 CLINICAL_MAX_TURNS = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFAULT)))
+FOLLOWUP_SELF_CRITIQUE = os.environ.get("FOLLOWUP_SELF_CRITIQUE", "").strip().lower() in ("1", "true", "yes")
 
 app = FastAPI(title="MedAssist.AI API")
+
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(app).expose(app)
+except Exception:
+    pass
 
 # Primary UX is Streamlit (full console). Override with STREAMLIT_PUBLIC_URL if needed.
 STREAMLIT_PUBLIC_URL = os.environ.get("STREAMLIT_PUBLIC_URL", "http://127.0.0.1:8501")
@@ -631,6 +641,28 @@ def _evaluate_evidence_quality(entries: list[dict]) -> dict:
     }
 
 
+def _audit_pipeline_metrics_assess(
+    *,
+    candidates: list[dict],
+    errors: list[str],
+    evidence_entries: list[dict],
+    fallback_mode: str,
+    t0: float,
+) -> dict:
+    eq = _evaluate_evidence_quality(evidence_entries)
+    return {
+        "evidence_fallback_mode": fallback_mode,
+        "evidence_quality_score": float(eq["score"]),
+        "evidence_sufficient": bool(eq["sufficient"]),
+        "evidence_trusted_count": int(eq["trusted_count"]),
+        "evidence_total_count": int(eq["count"]),
+        "n_candidates": len(candidates),
+        "n_top_candidates": min(8, len(candidates)),
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+        "error_flags_count": len(errors),
+    }
+
+
 def retrieve_evidence_journal_first(question: str, *, limit: int = 30) -> tuple[list[dict], str]:
     """
     Returns (entries, fallback_mode).
@@ -946,7 +978,7 @@ def _build_medassist_prompt_brief(question: str, context: str) -> str:
     )
 
 
-def _generate_with_gemini(prompt: str) -> str:
+def _generate_with_gemini(prompt: str, *, max_output_tokens: int = 4096) -> str:
     """Generate answer with Gemini and return normalized text."""
     contents = [
         types.Content(
@@ -958,7 +990,7 @@ def _generate_with_gemini(prompt: str) -> str:
     config = types.GenerateContentConfig(
         temperature=0.3,
         top_p=0.9,
-        max_output_tokens=4096,
+        max_output_tokens=max_output_tokens,
     )
 
     response = client.models.generate_content(
@@ -1033,6 +1065,7 @@ def ask(question: Question):
     Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
     and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
     """
+    t_ask0 = time.perf_counter()
     evidence_entries, fallback_mode = retrieve_evidence_journal_first(question.question, limit=30)
     literature = _format_literature_context(evidence_entries)
     # 2) Add symptom → rare-disease matches when the question looks like symptoms
@@ -1058,6 +1091,18 @@ def ask(question: Question):
             "Any high-risk comorbidities, active medications, or contraindications?",
             "What immediate red-flag vitals/labs/imaging are available?",
         ]
+        log_assessment_metrics(
+            run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+            metrics={
+                "evidence_quality_score": float(evidence_quality["score"]),
+                "evidence_trusted_count": int(evidence_quality["trusted_count"]),
+                "evidence_total_count": int(evidence_quality["count"]),
+                "evidence_sufficient": bool(evidence_quality["sufficient"]),
+                "llm_latency_ms": 0.0,
+                "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
+            },
+            tags={"endpoint": "ask", "provider": "none", "fallback_mode": "insufficient"},
+        )
         return {
             "answer": (
                 "Insufficient high-quality evidence for a reliable answer right now. "
@@ -1072,8 +1117,21 @@ def ask(question: Question):
             "follow_up_questions": followups,
         }
 
+    t_llm = time.perf_counter()
     answer_cortex = cortex_complete(prompt)
+    llm_ms = round((time.perf_counter() - t_llm) * 1000, 2)
     if _is_valid_cortex_answer(answer_cortex):
+        log_assessment_metrics(
+            run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+            metrics={
+                "evidence_quality_score": float(evidence_quality["score"]),
+                "evidence_trusted_count": int(evidence_quality["trusted_count"]),
+                "evidence_total_count": int(evidence_quality["count"]),
+                "llm_latency_ms": float(llm_ms),
+                "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
+            },
+            tags={"endpoint": "ask", "provider": "cortex", "fallback_mode": fallback_mode},
+        )
         return {
             "answer": answer_cortex,
             "provider": "cortex",
@@ -1084,7 +1142,20 @@ def ask(question: Question):
             "insufficient_evidence": False,
         }
 
+    t_llm2 = time.perf_counter()
     answer_gemini = _generate_with_gemini(prompt)
+    llm_ms_g = round((time.perf_counter() - t_llm2) * 1000, 2)
+    log_assessment_metrics(
+        run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+        metrics={
+            "evidence_quality_score": float(evidence_quality["score"]),
+            "evidence_trusted_count": int(evidence_quality["trusted_count"]),
+            "evidence_total_count": int(evidence_quality["count"]),
+            "llm_latency_ms": float(llm_ms + llm_ms_g),
+            "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
+        },
+        tags={"endpoint": "ask", "provider": "gemini", "fallback_mode": fallback_mode},
+    )
     return {
         "answer": answer_gemini,
         "provider": "gemini",
@@ -1383,12 +1454,13 @@ def start_encounter(payload: EncounterStartRequest, idempotency_key: str | None 
     return response
 
 
-@app.post("/encounters/{encounter_id}/assess-fast")
-def assess_fast(encounter_id: str):
+def _execute_assess_fast_body(encounter_id: str) -> dict | None:
+    """Core assess-fast pipeline; returns None if encounter missing."""
     ensure_clinical_tables()
+    t0 = time.perf_counter()
     encounter = get_encounter(encounter_id)
     if not encounter:
-        raise HTTPException(status_code=404, detail="Encounter not found")
+        return None
 
     candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, encounter=encounter, limit=12)
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
@@ -1412,6 +1484,13 @@ def assess_fast(encounter_id: str):
     evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
     evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
     evidence_sources = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
+    pipeline_metrics = _audit_pipeline_metrics_assess(
+        candidates=candidates,
+        errors=errors,
+        evidence_entries=evidence_entries,
+        fallback_mode=fallback_mode,
+        t0=t0,
+    )
     append_audit_row(
         encounter_id=encounter_id,
         turn_no=0,
@@ -1421,11 +1500,16 @@ def assess_fast(encounter_id: str):
         degraded_mode=degraded_mode,
         context_text=_summarize_encounter_context(encounter),
         output_text=answer,
-        kg_version=kg_version,
-        kg_build_id=kg_build_id,
+        kg_version=kg_version or "v1",
+        kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
+        pipeline_metrics=pipeline_metrics,
     )
-    # region agent log
+    log_assessment_metrics(
+        run_name=f"assess_fast_{encounter_id}",
+        metrics=pipeline_metrics,
+        tags={"endpoint": "assess_fast", "degraded_mode": degraded_mode or "none"},
+    )
     _api_debug_log(
         "H3",
         "api:assess_fast",
@@ -1437,7 +1521,6 @@ def assess_fast(encounter_id: str):
             "degraded_mode": degraded_mode,
         },
     )
-    # endregion
 
     return {
         "encounter_id": encounter_id,
@@ -1447,17 +1530,57 @@ def assess_fast(encounter_id: str):
         "contract": contract,
         "top_candidates": candidates[:8],
         "assessment": answer,
-        "kg_version": kg_version,
-        "kg_build_id": kg_build_id,
+        "kg_version": kg_version or "v1",
+        "kg_build_id": kg_build_id or "seed_symptom_map",
         "evidence_summary": evidence_summary,
         "evidence_sources": evidence_sources,
         "fallback_mode": fallback_mode,
     }
 
 
+@app.post("/encounters/{encounter_id}/assess-fast")
+def assess_fast(encounter_id: str):
+    out = _execute_assess_fast_body(encounter_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    return out
+
+
+_agentic_graph = None
+
+
+def _get_agentic_assess_graph():
+    global _agentic_graph
+    if _agentic_graph is not None:
+        return _agentic_graph
+    try:
+        _agentic_graph = build_assess_graph(_execute_assess_fast_body)
+    except Exception:
+        _agentic_graph = False
+    return _agentic_graph
+
+
+@app.post("/encounters/{encounter_id}/assess-agentic")
+def assess_agentic(encounter_id: str):
+    """Same clinical output as assess-fast, routed through a LangGraph agent wrapper for comparison."""
+    graph = _get_agentic_assess_graph()
+    if graph is False or graph is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LangGraph not available. Install langgraph and langchain-core.",
+        )
+    final = graph.invoke({"encounter_id": encounter_id})
+    payload = final.get("result")
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    trace = final.get("agent_trace") or []
+    return {**payload, "agent_trace": trace, "agent_provider": "langgraph"}
+
+
 @app.post("/encounters/{encounter_id}/assess-deep")
 def assess_deep(encounter_id: str):
     ensure_clinical_tables()
+    t0 = time.perf_counter()
     encounter = get_encounter(encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
@@ -1499,6 +1622,15 @@ def assess_deep(encounter_id: str):
         valid, missing = validate_contract(contract)
         if not valid:
             errors.extend([f"contract_missing:{x}" for x in missing])
+    evidence_query = _build_differential_evidence_query(encounter, candidates)
+    evidence_entries_pre, fallback_mode_pre = retrieve_evidence_journal_first(evidence_query, limit=12)
+    pipeline_metrics = _audit_pipeline_metrics_assess(
+        candidates=candidates,
+        errors=errors,
+        evidence_entries=evidence_entries_pre,
+        fallback_mode=fallback_mode_pre,
+        t0=t0,
+    )
     append_audit_row(
         encounter_id=encounter_id,
         turn_no=0,
@@ -1508,14 +1640,18 @@ def assess_deep(encounter_id: str):
         degraded_mode=degraded_mode,
         context_text=_summarize_encounter_context(encounter),
         output_text=answer,
-        kg_version=kg_version,
-        kg_build_id=kg_build_id,
+        kg_version=kg_version or "v1",
+        kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
+        pipeline_metrics=pipeline_metrics,
     )
-    evidence_query = _build_differential_evidence_query(encounter, candidates)
-    evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
-    evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
-    evidence_sources = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
+    log_assessment_metrics(
+        run_name=f"assess_deep_{encounter_id}",
+        metrics=pipeline_metrics,
+        tags={"endpoint": "assess_deep", "degraded_mode": degraded_mode or "none", "provider": provider},
+    )
+    evidence_summary = _short_evidence_summary(evidence_entries_pre, fallback_mode=fallback_mode_pre)
+    evidence_sources = _normalize_evidence_entries(evidence_entries_pre[:5], mode=fallback_mode_pre)
     return {
         "encounter_id": encounter_id,
         "provider_used": provider,
@@ -1523,11 +1659,11 @@ def assess_deep(encounter_id: str):
         "errors": errors,
         "top_candidates": candidates[:8],
         "assessment": answer,
-        "kg_version": kg_version,
-        "kg_build_id": kg_build_id,
+        "kg_version": kg_version or "v1",
+        "kg_build_id": kg_build_id or "seed_symptom_map",
         "evidence_summary": evidence_summary,
         "evidence_sources": evidence_sources,
-        "fallback_mode": fallback_mode,
+        "fallback_mode": fallback_mode_pre,
     }
 
 
@@ -1537,6 +1673,49 @@ def initial_assessment(encounter_id: str):
     if CLINICAL_USE_CORTEX:
         return assess_deep(encounter_id)
     return assess_fast(encounter_id)
+
+
+def _top_differential_snapshot(encounter: dict, limit: int = 3) -> list[dict]:
+    diff = encounter.get("differential") or []
+    if not diff:
+        return []
+    iterations = [int(d.get("iteration") or 0) for d in diff]
+    mx = max(iterations)
+    rows = [d for d in diff if int(d.get("iteration") or 0) == mx]
+    rows.sort(key=lambda x: int(x.get("rank_no") or 999))
+    out: list[dict] = []
+    for d in rows[:limit]:
+        out.append(
+            {
+                "disease_name": d.get("disease_name"),
+                "disease_code": d.get("disease_code"),
+                "score": d.get("score"),
+            }
+        )
+    return out
+
+
+def _followup_question_discriminative(encounter: dict, proposed_question: str) -> bool:
+    """Return True if the proposed follow-up is judged discriminative (fail-open on LLM errors)."""
+    if not (proposed_question or "").strip():
+        return True
+    top = _top_differential_snapshot(encounter, 3)
+    payload = json.dumps({"top_differential": top, "proposed_follow_up": proposed_question}, ensure_ascii=False)
+    prompt = (
+        "You are a clinical informatics reviewer. Given the top differential (JSON) and one proposed "
+        "follow-up question for the clinician, decide if the question is clinically discriminative "
+        "(helps narrow causes or distinguishes between listed differentials).\n"
+        "Reply with exactly one line starting with YES or NO, then a brief reason.\n\n"
+        f"{payload}"
+    )
+    try:
+        text = cortex_complete(prompt)
+        if not _is_valid_cortex_answer(text):
+            text = _generate_with_gemini(prompt, max_output_tokens=128)
+        line = (text or "").strip().splitlines()[0].upper() if (text or "").strip() else ""
+        return bool(line.startswith("YES"))
+    except Exception:
+        return True
 
 
 @app.post("/encounters/{encounter_id}/next-question")
@@ -1550,6 +1729,12 @@ def next_question(encounter_id: str):
     question_text, policy_reason = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
     if not question_text:
         question_text = "What is the symptom timeline and which symptom started first?"
+    if FOLLOWUP_SELF_CRITIQUE and not _followup_question_discriminative(encounter, question_text):
+        question_text, policy_reason = policy_next_question(
+            encounter,
+            max_turns=CLINICAL_MAX_TURNS,
+            skip_questions=(question_text,),
+        )
     add_question(encounter_id, turn_no, question_text)
     return {"encounter_id": encounter_id, "turn_no": turn_no, "question": question_text, "policy_reason": policy_reason}
 
@@ -1561,6 +1746,7 @@ def answer_question(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     ensure_clinical_tables()
+    t0 = time.perf_counter()
     encounter = get_encounter(encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
@@ -1593,6 +1779,16 @@ def answer_question(
     contract = _build_contract_from_candidates(updated or encounter, candidates, latest_answer=payload.answer)
     answer = contract_to_markdown(contract)
     provider = "knowledge_graph_context"
+    evidence_query = _build_differential_evidence_query(updated or encounter, candidates)
+    evidence_entries_ans, fallback_mode_ans = retrieve_evidence_journal_first(evidence_query, limit=12)
+    pipeline_metrics = _audit_pipeline_metrics_assess(
+        candidates=candidates,
+        errors=errors,
+        evidence_entries=evidence_entries_ans,
+        fallback_mode=fallback_mode_ans,
+        t0=t0,
+    )
+    pipeline_metrics["turn_no"] = int(payload.turn_no)
     append_audit_row(
         encounter_id=encounter_id,
         turn_no=payload.turn_no,
@@ -1602,9 +1798,15 @@ def answer_question(
         degraded_mode=degraded_mode,
         context_text=_summarize_encounter_context(updated or encounter),
         output_text=answer,
-        kg_version=kg_version,
-        kg_build_id=kg_build_id,
+        kg_version=kg_version or "v1",
+        kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
+        pipeline_metrics=pipeline_metrics,
+    )
+    log_assessment_metrics(
+        run_name=f"answer_{encounter_id}_t{payload.turn_no}",
+        metrics=pipeline_metrics,
+        tags={"endpoint": "answer", "degraded_mode": degraded_mode or "none"},
     )
 
     response = {
@@ -1615,14 +1817,12 @@ def answer_question(
         "contract": contract,
         "top_candidates": candidates[:8],
         "assessment": answer,
-        "kg_version": kg_version,
-        "kg_build_id": kg_build_id,
+        "kg_version": kg_version or "v1",
+        "kg_build_id": kg_build_id or "seed_symptom_map",
     }
-    evidence_query = _build_differential_evidence_query(updated or encounter, candidates)
-    evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
-    response["evidence_summary"] = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
-    response["evidence_sources"] = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
-    response["fallback_mode"] = fallback_mode
+    response["evidence_summary"] = _short_evidence_summary(evidence_entries_ans, fallback_mode=fallback_mode_ans)
+    response["evidence_sources"] = _normalize_evidence_entries(evidence_entries_ans[:5], mode=fallback_mode_ans)
+    response["fallback_mode"] = fallback_mode_ans
     if idempotency_key:
         store_idempotent_response("/encounters/answer", idempotency_key, req_hash, response)
     return response

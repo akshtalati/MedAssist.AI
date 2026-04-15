@@ -117,8 +117,11 @@ flowchart TB
     subgraph api [FastAPI api/main.py]
       E1[POST /encounters/start]
       E2[POST assess-fast]
+      E2A[POST assess-agentic LangGraph]
       E3[POST next-question / answer]
       A1[POST /ask]
+      PM[GET /metrics Prometheus]
+      ML[MLflow optional metrics]
     end
 
     subgraph diff [Differential engine]
@@ -151,10 +154,15 @@ flowchart TB
     T1 --> E1
     T1 --> E2
     T1 --> E3
+    T1 -.-> E2A
+    E2 -.-> PM
+    E2 -.-> ML
     T2 --> A1
     E1 --> ENC
     E2 --> RK
     E2 --> FB
+    E2A --> RK
+    E2A --> FB
     RK --> KGG
     FB --> ENC
     E2 --> V1

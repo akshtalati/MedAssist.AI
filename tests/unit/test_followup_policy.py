@@ -19,6 +19,17 @@ def test_followup_policy_avoids_repeat():
     assert reason in {"default", "differential_narrowing", "information_gain_rule"}
 
 
+def test_skip_questions_falls_through():
+    encounter = {
+        "symptoms": [{"symptom": "fever"}],
+        "qa_history": [],
+    }
+    first, _ = next_question(encounter, max_turns=5)
+    second, reason = next_question(encounter, max_turns=5, skip_questions=(first,))
+    assert second != first
+    assert reason in {"information_gain_rule", "differential_narrowing", "default", "default_after_skip"}
+
+
 def test_differential_narrowing_when_no_symptom_rule():
     """Symptom not in QUESTION_RULES → use top two differential names."""
     encounter = {

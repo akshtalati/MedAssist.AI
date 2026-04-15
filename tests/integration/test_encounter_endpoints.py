@@ -78,6 +78,11 @@ def test_ask_returns_evidence_and_fallback_mode(monkeypatch):
     )
     monkeypatch.setattr(main, "fetch_symptom_disease_context", lambda question, limit=50: "")
     monkeypatch.setattr(main, "cortex_complete", lambda prompt: "### Summary\nok")
+    monkeypatch.setattr(
+        main,
+        "_evaluate_evidence_quality",
+        lambda entries: {"sufficient": True, "score": 0.85, "trusted_count": 1, "count": 1},
+    )
     client = TestClient(main.app)
     res = client.post("/ask", json={"question": "fever and headache", "brief": False})
     assert res.status_code == 200

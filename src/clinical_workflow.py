@@ -30,12 +30,14 @@ def _evolve_clinical_table_columns(cur) -> None:
     _add_column_if_missing(cur, diff, "kg_version", "STRING")
     _add_column_if_missing(cur, diff, "kg_build_id", "STRING")
     _add_column_if_missing(cur, diff, "source_snapshot_ts", "TIMESTAMP_NTZ")
+    _add_column_if_missing(cur, diff, "confidence_score", "FLOAT")
     audit = "CLINICAL.ENCOUNTER_AUDIT"
     _add_column_if_missing(cur, audit, "context_hash", "STRING")
     _add_column_if_missing(cur, audit, "output_hash", "STRING")
     _add_column_if_missing(cur, audit, "kg_version", "STRING")
     _add_column_if_missing(cur, audit, "kg_build_id", "STRING")
     _add_column_if_missing(cur, audit, "error_flags", "VARIANT")
+    _add_column_if_missing(cur, audit, "pipeline_metrics", "VARIANT")
 
 
 @dataclass
@@ -117,6 +119,7 @@ def ensure_clinical_tables() -> None:
               score FLOAT,
               rationale STRING,
               source STRING,
+              confidence_score FLOAT,
               created_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
             )
             """,
@@ -413,8 +416,8 @@ def save_differential(
             cur.execute(
                 """
                 INSERT INTO CLINICAL.ENCOUNTER_DIFFERENTIAL
-                  (encounter_id, iteration, rank_no, disease_name, disease_code, kg_version, kg_build_id, source_snapshot_ts, score, rationale, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  (encounter_id, iteration, rank_no, disease_name, disease_code, kg_version, kg_build_id, source_snapshot_ts, score, rationale, source, confidence_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     encounter_id,
@@ -428,6 +431,7 @@ def save_differential(
                     float(r.get("score", 0.0)),
                     r.get("rationale", ""),
                     r.get("source", "knowledge_graph"),
+                    float(r["confidence_score"]) if r.get("confidence_score") is not None else None,
                 ),
             )
     finally:
@@ -510,8 +514,8 @@ def answer_and_update_tx(
             cur.execute(
                 """
                 INSERT INTO CLINICAL.ENCOUNTER_DIFFERENTIAL
-                  (encounter_id, iteration, rank_no, disease_name, disease_code, kg_version, kg_build_id, source_snapshot_ts, score, rationale, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                  (encounter_id, iteration, rank_no, disease_name, disease_code, kg_version, kg_build_id, source_snapshot_ts, score, rationale, source, confidence_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     encounter_id,
@@ -525,6 +529,7 @@ def answer_and_update_tx(
                     float(r.get("score", 0.0)),
                     r.get("rationale", ""),
                     r.get("source", "knowledge_graph"),
+                    float(r["confidence_score"]) if r.get("confidence_score") is not None else None,
                 ),
             )
         cur.execute("COMMIT")
@@ -576,7 +581,7 @@ def get_encounter(encounter_id: str) -> dict[str, Any] | None:
         qa = [{"turn_no": int(t), "question": q, "answer": a} for t, q, a in cur.fetchall()]
         cur.execute(
             """
-            SELECT iteration, rank_no, disease_name, disease_code, score, rationale, source
+            SELECT iteration, rank_no, disease_name, disease_code, score, rationale, source, confidence_score
             FROM CLINICAL.ENCOUNTER_DIFFERENTIAL
             WHERE encounter_id = %s
             ORDER BY iteration DESC, rank_no ASC
@@ -592,8 +597,9 @@ def get_encounter(encounter_id: str) -> dict[str, Any] | None:
                 "score": float(sc or 0.0),
                 "rationale": rs,
                 "source": src,
+                **({"confidence_score": float(cf)} if cf is not None else {}),
             }
-            for i, r, dn, dc, sc, rs, src in cur.fetchall()
+            for i, r, dn, dc, sc, rs, src, cf in cur.fetchall()
         ]
         return normalize_encounter_dict(
             {
@@ -617,6 +623,10 @@ def get_encounter(encounter_id: str) -> dict[str, Any] | None:
 def rank_diseases_from_graph(encounter_id: str, limit: int = 12) -> list[dict[str, Any]]:
     """
     Rank candidate diseases using KG edges + encounter symptoms.
+
+    Each row includes ``confidence_score`` in [0, 1]: share of encounter symptoms that
+    match the disease via HAS_SYMPTOM (same as SQL ``coverage``). Sort order is unchanged
+    (still by matched_symptoms, coverage, name).
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -645,7 +655,12 @@ def rank_diseases_from_graph(encounter_id: str, limit: int = 12) -> list[dict[st
                AND n.node_type = 'DISEASE'
               GROUP BY n.node_label, n.attributes:orpha_code::STRING
             )
-            SELECT disease_name, disease_code, matched_symptoms, coverage
+            SELECT
+              disease_name,
+              disease_code,
+              matched_symptoms,
+              coverage,
+              (SELECT COUNT(*)::FLOAT FROM symptom_nodes) AS n_encounter_symptoms
             FROM disease_scores
             ORDER BY matched_symptoms DESC, coverage DESC, disease_name
             LIMIT %s
@@ -658,7 +673,12 @@ def rank_diseases_from_graph(encounter_id: str, limit: int = 12) -> list[dict[st
         conn.close()
 
     out: list[dict[str, Any]] = []
-    for disease_name, disease_code, matched, coverage in rows or []:
+    for disease_name, disease_code, matched, coverage, n_enc in rows or []:
+        cov = float(coverage or 0.0)
+        m = float(matched or 0.0)
+        ns = float(n_enc or 0.0)
+        damp = m / max(1.0, ns) if ns else 0.0
+        confidence_score = round(min(1.0, max(0.0, cov * damp)), 6)
         out.append(
             {
                 "disease_name": disease_name,
@@ -666,6 +686,7 @@ def rank_diseases_from_graph(encounter_id: str, limit: int = 12) -> list[dict[st
                 "score": float((matched or 0) + (coverage or 0)),
                 "rationale": f"Matched symptoms: {int(matched or 0)}; coverage={float(coverage or 0):.2f}",
                 "source": "knowledge_graph",
+                "confidence_score": confidence_score,
             }
         )
     return out
@@ -686,7 +707,8 @@ def rank_diseases_from_symptom_map(encounter_id: str, limit: int = 12) -> list[d
             SELECT
               m.disease_name,
               COALESCE(m.orpha_code, '') AS disease_code,
-              COUNT(*)::FLOAT AS matched
+              COUNT(*)::FLOAT AS matched,
+              (SELECT COUNT(*)::FLOAT FROM symptoms) AS n_encounter_symptoms
             FROM NORMALIZED.SYMPTOM_DISEASE_MAP m
             JOIN symptoms s
               ON LOWER(m.symptom) LIKE '%%' || s.symptom || '%%'
@@ -701,16 +723,23 @@ def rank_diseases_from_symptom_map(encounter_id: str, limit: int = 12) -> list[d
         cur.close()
         conn.close()
 
-    return [
-        {
-            "disease_name": dn,
-            "disease_code": dc,
-            "score": float(matched or 0.0),
-            "rationale": f"Symptom-map matches: {int(matched or 0)}",
-            "source": "symptom_map",
-        }
-        for dn, dc, matched in (rows or [])
-    ]
+    out: list[dict[str, Any]] = []
+    for dn, dc, matched, n_enc in rows or []:
+        ns = float(n_enc or 0.0)
+        m = float(matched or 0.0)
+        cov = (m / ns) if ns else 0.0
+        confidence_score = round(min(1.0, max(0.0, cov)), 6)
+        out.append(
+            {
+                "disease_name": dn,
+                "disease_code": dc,
+                "score": float(matched or 0.0),
+                "rationale": f"Symptom-map matches: {int(matched or 0)}",
+                "source": "symptom_map",
+                "confidence_score": confidence_score,
+            }
+        )
+    return out
 
 
 _STOP = frozenset(
@@ -755,6 +784,10 @@ def merge_candidate_rankings(*lists: list[dict[str, Any]], limit: int = 12) -> l
                 by_key[key] = dict(c)
             else:
                 by_key[key]["score"] = max(float(by_key[key].get("score") or 0), sc)
+                prev_cf = float(by_key[key].get("confidence_score") or 0.0)
+                new_cf = float(c.get("confidence_score") or 0.0)
+                if new_cf or prev_cf:
+                    by_key[key]["confidence_score"] = max(prev_cf, new_cf)
                 src = by_key[key].get("source", "")
                 if c.get("source") and c["source"] not in src:
                     by_key[key]["source"] = f"{src}+{c['source']}" if src else c["source"]
@@ -804,6 +837,7 @@ def rank_diseases_from_context_tokens(encounter: dict[str, Any], limit: int = 12
             "score": max(0.25, float(matched or 0.0) * 0.2),
             "rationale": f"Context/history token match in map: {int(matched or 0)}",
             "source": "symptom_map_context",
+            "confidence_score": round(min(1.0, max(0.0, 0.15 + 0.05 * float(matched or 0.0))), 6),
         }
         for dn, dc, matched in (rows or [])
     ]
@@ -974,6 +1008,7 @@ def append_audit_row(
     kg_version: str,
     kg_build_id: str,
     error_flags: list[str] | None = None,
+    pipeline_metrics: dict[str, Any] | None = None,
 ) -> None:
     conn = get_connection()
     cur = conn.cursor()
@@ -982,8 +1017,8 @@ def append_audit_row(
         cur.execute(
             """
             INSERT INTO CLINICAL.ENCOUNTER_AUDIT
-              (encounter_id, turn_no, action, provider, model_name, degraded_mode, context_hash, output_hash, kg_version, kg_build_id, error_flags)
-            SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s)
+              (encounter_id, turn_no, action, provider, model_name, degraded_mode, context_hash, output_hash, kg_version, kg_build_id, error_flags, pipeline_metrics)
+            SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s)
             """,
             (
                 encounter_id,
@@ -997,6 +1032,7 @@ def append_audit_row(
                 kg_version,
                 kg_build_id,
                 json.dumps(error_flags or []),
+                json.dumps(pipeline_metrics or {}),
             ),
         )
     finally:
