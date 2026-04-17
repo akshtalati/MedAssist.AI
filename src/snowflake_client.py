@@ -13,8 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def get_snowflake_conn_params() -> dict[str, Any]:
     """Get connection params from env. See .env.example for required vars."""
-    account = os.environ.get("SNOWFLAKE_ACCOUNT", "SFEDU02-PGB87192")
-    user = os.environ.get("SNOWFLAKE_USER", "CRICKET")
+    account = os.environ.get("SNOWFLAKE_ACCOUNT", "").strip()
+    user = os.environ.get("SNOWFLAKE_USER", "").strip()
     password = os.environ.get("SNOWFLAKE_PASSWORD", "")
     authenticator = os.environ.get("SNOWFLAKE_AUTHENTICATOR", "")
     role = os.environ.get("SNOWFLAKE_ROLE", "TRAINING_ROLE")
@@ -22,7 +22,12 @@ def get_snowflake_conn_params() -> dict[str, Any]:
     database = os.environ.get("SNOWFLAKE_DATABASE", "MEDASSIST_DB")
     schema = os.environ.get("SNOWFLAKE_SCHEMA", "RAW")
 
-    params = {
+    if not account or not user:
+        raise ValueError(
+            "Set SNOWFLAKE_ACCOUNT and SNOWFLAKE_USER in the environment (see .env.example)."
+        )
+
+    params: dict[str, Any] = {
         "account": account,
         "user": user,
         "role": role,

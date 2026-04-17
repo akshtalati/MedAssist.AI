@@ -1,10 +1,39 @@
-from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from contextlib import asynccontextmanager
+from functools import partial
+import logging
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import RedirectResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+import csv
+import io
 import os
 import json
 import time
+import uuid
+from pathlib import Path
 from urllib.parse import quote_plus
+from urllib import request as urllib_request
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.middleware.cors import CORSMiddleware
+
+from api.auth import (
+    ALLOW_OPEN_REGISTRATION,
+    AdminUser,
+    CurrentUser,
+    DEFAULT_ORG_ID,
+    TokenUser,
+    create_access_token,
+    create_user,
+    decode_token,
+    get_user_by_username,
+    init_user_db,
+    user_can_access_encounter,
+    verify_password,
+)
 
 from google import genai
 from google.genai import types
@@ -26,6 +55,9 @@ from src.clinical_workflow import (
     create_encounter,
     create_encounter_tx,
     ensure_clinical_tables,
+    fetch_audit_action_summary,
+    fetch_audit_rows_for_export,
+    ingest_followup_answer_tokens,
     fetch_idempotent_response,
     get_encounter,
     get_encounter_kg_preview,
@@ -34,11 +66,11 @@ from src.clinical_workflow import (
     hash_payload,
     merge_candidate_rankings,
     next_turn_no,
+    purge_encounter_data,
     rank_diseases_from_context_tokens,
     rank_diseases_from_symptom_map,
     rank_diseases_from_graph,
     save_differential,
-    save_diff_delta,
     seed_graph_from_symptom_map,
     store_idempotent_response,
 )
@@ -47,23 +79,93 @@ from src.grounding import extract_urls_from_context, validate_grounding
 from src.response_contract import contract_to_markdown, normalize_contract, validate_contract
 from src.mlflow_telemetry import log_assessment_metrics
 from src.agentic.assessment_graph import build_assess_graph
+from src.report_pdf import build_encounter_pdf
+from src.retrieval.rerank import maybe_rerank_literature
 
-# region agent log
-_API_DEBUG_LOG = "/Users/akshtalati/Desktop/genai/MedAssist.AI/.cursor/debug-0a57e9.log"
+_log = logging.getLogger("medassist.api")
+_DEBUG_LOG_PATH = "/Users/atharvakurlekar/Library/CloudStorage/OneDrive-NortheasternUniversity/Data Engineering/med/MedAssist.AI/.cursor/debug-742e45.log"
+_DEBUG_ENDPOINT = "http://127.0.0.1:7299/ingest/6c1651b6-79fe-48a7-a0a7-0d0f9a35fdde"
 
 
 def _api_debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    if os.environ.get("DEBUG", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    _log.debug("%s %s %s %s", hypothesis_id, location, message, json.dumps(data, default=str))
+
+
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
     try:
         payload = {
-            "sessionId": "0a57e9",
-            "timestamp": int(time.time() * 1000),
+            "sessionId": "742e45",
+            "runId": run_id,
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
             "data": data,
+            "timestamp": int(time.time() * 1000),
         }
-        with open(_API_DEBUG_LOG, "a", encoding="utf-8") as f:
+        req = urllib_request.Request(
+            _DEBUG_ENDPOINT,
+            data=json.dumps(payload, default=str).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "742e45",
+            },
+            method="POST",
+        )
+        urllib_request.urlopen(req, timeout=0.7).read()
+    except Exception:
+        return
+
+
+# region agent log
+_PERF_DEBUG_LOG_064 = Path(__file__).resolve().parent.parent / ".cursor" / "debug-064a4f.log"
+_PERF064_SESSION = "064a4f"
+
+
+def _perf_debug_064(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    *,
+    pipeline: str,
+    encounter_id: str,
+    phase: str,
+    elapsed_ms: float,
+    extra: dict | None = None,
+) -> None:
+    """NDJSON timing for debug session 064a4f (no secrets / no PII)."""
+    payload = {
+        "sessionId": _PERF064_SESSION,
+        "timestamp": int(time.time() * 1000),
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": {
+            "pipeline": pipeline,
+            "encounter_id": encounter_id,
+            "phase": phase,
+            "elapsed_ms": round(elapsed_ms, 2),
+            **(extra or {}),
+        },
+    }
+    try:
+        _PERF_DEBUG_LOG_064.parent.mkdir(parents=True, exist_ok=True)
+        with open(_PERF_DEBUG_LOG_064, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+    try:
+        req = urllib_request.Request(
+            _DEBUG_ENDPOINT,
+            data=json.dumps(payload, default=str).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": _PERF064_SESSION,
+            },
+            method="POST",
+        )
+        urllib_request.urlopen(req, timeout=0.7).read()
     except Exception:
         pass
 
@@ -119,7 +221,49 @@ CLINICAL_USE_CORTEX = os.environ.get("CLINICAL_USE_CORTEX", "0") == "1"
 CLINICAL_MAX_TURNS = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFAULT)))
 FOLLOWUP_SELF_CRITIQUE = os.environ.get("FOLLOWUP_SELF_CRITIQUE", "").strip().lower() in ("1", "true", "yes")
 
-app = FastAPI(title="MedAssist.AI API")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    init_user_db()
+    yield
+
+
+app = FastAPI(title="MedAssist.AI API", lifespan=_lifespan)
+
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app)
+except Exception:
+    pass
+
+
+class _TraceIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        tid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.trace_id = tid
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = tid
+        return response
+
+
+app.add_middleware(_TraceIdMiddleware)
+
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:8501,http://localhost:8501,http://127.0.0.1:3000,http://localhost:3000",
+    ).split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 try:
     from prometheus_fastapi_instrumentator import Instrumentator
@@ -128,8 +272,180 @@ try:
 except Exception:
     pass
 
+try:
+    from prometheus_client import Counter, Histogram
+
+    _PROM_RAG = Counter("medassist_rag_fetch_total", "RAG retrieval outcomes", ["result"])
+    _PROM_EVIDENCE_MODE = Counter("medassist_evidence_mode_total", "Journal-first evidence path", ["mode"])
+    _PROM_ASSESS_FAST = Histogram(
+        "medassist_assess_fast_seconds",
+        "Assess-fast pipeline wall time",
+        buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 15.0, 60.0, 120.0),
+    )
+except Exception:
+    _PROM_RAG = None
+    _PROM_EVIDENCE_MODE = None
+    _PROM_ASSESS_FAST = None
+
+
+def _prom_rag_result(hit: bool) -> None:
+    if _PROM_RAG:
+        _PROM_RAG.labels(result="hit" if hit else "miss").inc()
+
+
+def _prom_evidence_mode(mode: str) -> None:
+    if _PROM_EVIDENCE_MODE:
+        _PROM_EVIDENCE_MODE.labels(mode=mode).inc()
+
+
 # Primary UX is Streamlit (full console). Override with STREAMLIT_PUBLIC_URL if needed.
 STREAMLIT_PUBLIC_URL = os.environ.get("STREAMLIT_PUBLIC_URL", "http://127.0.0.1:8501")
+
+_bearer_optional = HTTPBearer(auto_error=False)
+
+
+def _assert_encounter_access(user: TokenUser, encounter_id: str) -> dict:
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    if not user_can_access_encounter(user, encounter):
+        raise HTTPException(status_code=403, detail="Not allowed to access this encounter")
+    return encounter
+
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterBody(BaseModel):
+    username: str
+    password: str
+    role: str = "doctor"
+    org_id: str | None = None
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/auth/login")
+def auth_login(body: LoginBody):
+    user = get_user_by_username(body.username)
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = create_access_token(
+        sub=user["id"],
+        username=user["username"],
+        role=user["role"],
+        org_id=user["org_id"],
+    )
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": user["role"],
+        "org_id": user["org_id"],
+        "user_id": user["id"],
+    }
+
+
+@app.post("/auth/register")
+def auth_register(
+    body: RegisterBody,
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_optional)],
+):
+    """Create a user. Open registration (doctor-only) when ALLOW_OPEN_REGISTRATION=1; otherwise requires admin Bearer token."""
+    org = (body.org_id or "").strip() or DEFAULT_ORG_ID
+    role = (body.role or "doctor").lower()
+    if ALLOW_OPEN_REGISTRATION:
+        if role != "doctor":
+            raise HTTPException(status_code=400, detail="Open registration only supports role=doctor")
+        try:
+            create_user(body.username, body.password, "doctor", org)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"ok": True}
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Admin Bearer token required when open registration is disabled")
+    try:
+        claims = decode_token(creds.credentials)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
+    if str(claims.get("role", "")).lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    if role not in ("doctor", "admin"):
+        raise HTTPException(status_code=400, detail="role must be doctor or admin")
+    try:
+        create_user(body.username, body.password, role, org)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(user: CurrentUser):
+    return {"user_id": user.sub, "username": user.username, "role": user.role, "org_id": user.org_id}
+
+
+@app.get("/admin/metrics/summary")
+def admin_metrics_summary(
+    _admin: AdminUser,
+    since: str | None = Query(None, description="ISO timestamp lower bound (Snowflake)"),
+    until: str | None = Query(None, description="ISO timestamp upper bound"),
+):
+    """Aggregate audit counts by action (admin only). Requires Snowflake."""
+    ensure_clinical_tables()
+    actions = fetch_audit_action_summary(since_iso=since, until_iso=until)
+    return {"actions": actions, "window": {"since": since, "until": until}}
+
+
+@app.get("/admin/audit/export.csv")
+def admin_audit_export_csv(
+    _admin: AdminUser,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+    limit: int = Query(5000, ge=1, le=20000),
+):
+    """Download bounded audit rows as CSV (admin only)."""
+    ensure_clinical_tables()
+    rows = fetch_audit_rows_for_export(since_iso=since, until_iso=until, limit=limit)
+    buf = io.StringIO()
+    if not rows:
+        return Response(content="", media_type="text/csv")
+    fieldnames = list(rows[0].keys())
+    w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        flat = dict(r)
+        pm = flat.get("pipeline_metrics")
+        if pm is not None and not isinstance(pm, str):
+            flat["pipeline_metrics"] = json.dumps(pm, default=str)
+        w.writerow(flat)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="medassist_encounter_audit.csv"'},
+    )
+
+
+@app.post("/admin/encounters/{encounter_id}/purge")
+def admin_purge_encounter(encounter_id: str, _admin: AdminUser):
+    """Delete encounter and dependent rows from Snowflake (admin only; irreversible)."""
+    ensure_clinical_tables()
+    purge_encounter_data(encounter_id)
+    return {"ok": True, "encounter_id": encounter_id}
+
+
+@app.post("/analytics/event")
+def analytics_event(
+    user: CurrentUser,
+    tab: str = Query(..., description="UI tab or feature id"),
+    event: str = Query("open", description="e.g. open, click"),
+):
+    """Privacy-preserving product analytics hook (no PHI); optional Snowflake sink can be added later."""
+    _log.info("analytics_event tab=%s event=%s org=%s user=%s", tab, event, user.org_id, user.sub)
+    return {"ok": True}
 
 
 @app.get("/")
@@ -260,6 +576,14 @@ def _extract_query_terms(question: str, *, max_terms: int = 8) -> list[str]:
             terms.append(t)
         if len(terms) >= max_terms:
             break
+    # Adjacent token pairs improve ILIKE recall for short clinical phrases.
+    base = list(terms)
+    for i in range(len(base) - 1):
+        if len(terms) >= max_terms:
+            break
+        pair = f"{base[i]} {base[i + 1]}"
+        if pair not in terms:
+            terms.append(pair)
     return terms
 
 
@@ -672,28 +996,36 @@ def retrieve_evidence_journal_first(question: str, *, limit: int = 30) -> tuple[
       - insufficient: still weak after fallback
     """
     rag_entries = _fetch_rag_entries(question, limit=15)
+    _prom_rag_result(bool(rag_entries))
     ilike_entries: list[dict] = []
     if len(rag_entries) < 5:
         ilike_entries = _fetch_ilike_entries(question, limit=limit)
     journal_entries = _merge_and_dedupe_literature(rag_entries, ilike_entries)
+    journal_entries = maybe_rerank_literature(question, journal_entries, top_k=max(limit, 40))
     if _is_evidence_sufficient(journal_entries):
+        _prom_evidence_mode("journal_first")
         return journal_entries[:limit], "journal_first"
 
     live_pubmed = _fetch_live_pubmed_entries(question, limit=min(10, limit))
     combined = _merge_and_dedupe_literature(journal_entries, live_pubmed)
     if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        _prom_evidence_mode("web_assisted")
         return combined[:limit], "web_assisted"
 
     europe_pmc = _fetch_europe_pmc_entries(question, limit=min(10, limit))
     combined = _merge_and_dedupe_literature(combined, europe_pmc)
     if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        _prom_evidence_mode("web_assisted")
         return combined[:limit], "web_assisted"
 
     web_entries = _fetch_web_entries(question, limit=min(8, limit))
     combined = _merge_and_dedupe_literature(combined, web_entries)
     if _is_evidence_sufficient(combined, min_items=3, min_with_url=2):
+        _prom_evidence_mode("web_assisted")
         return combined[:limit], "web_assisted"
-    return combined[:limit], "insufficient"
+    out = combined[:limit]
+    _prom_evidence_mode("insufficient")
+    return out, "insufficient"
 
 
 def fetch_all_literature_context_hybrid(question: str, limit: int = 30) -> str:
@@ -1060,7 +1392,7 @@ def _build_differential_evidence_query(encounter: dict, candidates: list[dict]) 
 
 
 @app.post("/ask")
-def ask(question: Question):
+def ask(question: Question, user: CurrentUser):
     """
     Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
     and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
@@ -1170,7 +1502,7 @@ def ask(question: Question):
 
 
 @app.post("/ask-both")
-def ask_both(question: Question):
+def ask_both(question: Question, user: CurrentUser):
     """
     Return two answers for the same question: one from Gemini (Vertex AI) and one from
     Snowflake Cortex (claude-sonnet-4-6), both using the same hybrid context (RAG + ILIKE).
@@ -1198,7 +1530,7 @@ def ask_both(question: Question):
 
 
 @app.post("/ask-cortex")
-def ask_cortex(question: Question):
+def ask_cortex(question: Question, user: CurrentUser):
     """
     MedRAG-style endpoint backed entirely by Snowflake Cortex.
 
@@ -1335,17 +1667,66 @@ def _attempt_rank_with_degradation(
     ranked: list[dict] = []
     kg_ranked: list[dict] = []
     degraded = "none"
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H5",
+        location="api/main.py:_attempt_rank_with_degradation:entry",
+        message="rank_attempt_start",
+        data={
+            "encounter_id": encounter_id,
+            "limit": int(limit),
+            "encounter_present": bool(enc),
+        },
+    )
+    # endregion
     try:
         kg_ranked = rank_diseases_from_graph(encounter_id, limit=limit)
         ranked = list(kg_ranked)
+        # region agent log
+        _debug_log(
+            run_id="pre-fix",
+            hypothesis_id="H5",
+            location="api/main.py:_attempt_rank_with_degradation:kg_success",
+            message="kg_rank_success",
+            data={"encounter_id": encounter_id, "kg_count": len(kg_ranked)},
+        )
+        # endregion
     except Exception as exc:
         errors.append(f"kg_unavailable:{exc}")
         degraded = "symptom_map_only"
+        # region agent log
+        _debug_log(
+            run_id="pre-fix",
+            hypothesis_id="H5",
+            location="api/main.py:_attempt_rank_with_degradation:kg_error",
+            message="kg_rank_failed",
+            data={"encounter_id": encounter_id, "error": str(exc)},
+        )
+        # endregion
     if not ranked:
         try:
             ranked = rank_diseases_from_symptom_map(encounter_id, limit=limit)
+            # region agent log
+            _debug_log(
+                run_id="pre-fix",
+                hypothesis_id="H5",
+                location="api/main.py:_attempt_rank_with_degradation:symptom_map_success",
+                message="symptom_map_rank_success",
+                data={"encounter_id": encounter_id, "count": len(ranked)},
+            )
+            # endregion
         except Exception as exc2:
             errors.append(f"symptom_map_unavailable:{exc2}")
+            # region agent log
+            _debug_log(
+                run_id="pre-fix",
+                hypothesis_id="H5",
+                location="api/main.py:_attempt_rank_with_degradation:symptom_map_error",
+                message="symptom_map_rank_failed",
+                data={"encounter_id": encounter_id, "error": str(exc2)},
+            )
+            # endregion
     if enc:
         try:
             ctx_rank = rank_diseases_from_context_tokens(enc, limit=min(12, limit))
@@ -1374,6 +1755,36 @@ def _attempt_rank_with_degradation(
         degraded = "no_ranker"
     elif degraded == "none" and errors:
         pass
+    # Order by estimated clinical probability so follow-up answers can move diagnoses up/down.
+    ranked.sort(
+        key=lambda x: (
+            -float(x.get("confidence_score") if x.get("confidence_score") is not None else 0.0),
+            -float(x.get("score") or 0.0),
+        )
+    )
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H5",
+        location="api/main.py:_attempt_rank_with_degradation:exit",
+        message="rank_attempt_end",
+        data={
+            "encounter_id": encounter_id,
+            "degraded_mode": degraded,
+            "errors_count": len(errors),
+            "ranked_count": len(ranked),
+            "top3": [
+                {
+                    "disease_name": c.get("disease_name"),
+                    "score": c.get("score"),
+                    "confidence_score": c.get("confidence_score"),
+                    "source": c.get("source"),
+                }
+                for c in ranked[:3]
+            ],
+        },
+    )
+    # endregion
     return ranked, degraded, errors
 
 
@@ -1427,7 +1838,15 @@ def _heuristic_next_question(encounter: dict) -> str:
 
 
 @app.post("/encounters/start")
-def start_encounter(payload: EncounterStartRequest, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+def start_encounter(
+    payload: EncounterStartRequest,
+    user: CurrentUser,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        description="Optional. Reuse with identical JSON body to replay the same response; different body returns 409.",
+    ),
+):
     ensure_clinical_tables()
     seed_graph_from_symptom_map()
     req_payload = payload.model_dump(mode="json")
@@ -1446,6 +1865,8 @@ def start_encounter(payload: EncounterStartRequest, idempotency_key: str | None 
         allergies=payload.allergies,
         history_summary=payload.history_summary,
         symptoms=[s.model_dump() for s in payload.symptoms],
+        org_id=user.org_id,
+        created_by_user_id=user.sub,
     )
     encounter_id = create_encounter_tx(inp)
     response = {"encounter_id": encounter_id}
@@ -1454,7 +1875,7 @@ def start_encounter(payload: EncounterStartRequest, idempotency_key: str | None 
     return response
 
 
-def _execute_assess_fast_body(encounter_id: str) -> dict | None:
+def _execute_assess_fast_body(encounter_id: str, *, actor_user_id: str | None = None) -> dict | None:
     """Core assess-fast pipeline; returns None if encounter missing."""
     ensure_clinical_tables()
     t0 = time.perf_counter()
@@ -1463,6 +1884,18 @@ def _execute_assess_fast_body(encounter_id: str) -> dict | None:
         return None
 
     candidates, degraded_mode, errors = _attempt_rank_with_degradation(encounter_id, encounter=encounter, limit=12)
+    # region agent log
+    _perf_debug_064(
+        "H2",
+        "api/main.py:_execute_assess_fast_body",
+        "phase_timing",
+        pipeline="assess_fast",
+        encounter_id=encounter_id,
+        phase="after_rank",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"n_candidates": len(candidates)},
+    )
+    # endregion
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
     save_differential(
         encounter_id,
@@ -1482,6 +1915,18 @@ def _execute_assess_fast_body(encounter_id: str) -> dict | None:
     answer = contract_to_markdown(contract)
     evidence_query = _build_differential_evidence_query(encounter, candidates)
     evidence_entries, fallback_mode = retrieve_evidence_journal_first(evidence_query, limit=12)
+    # region agent log
+    _perf_debug_064(
+        "H1",
+        "api/main.py:_execute_assess_fast_body",
+        "phase_timing",
+        pipeline="assess_fast",
+        encounter_id=encounter_id,
+        phase="after_evidence_retrieval",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"fallback_mode": fallback_mode, "n_evidence": len(evidence_entries or [])},
+    )
+    # endregion
     evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
     evidence_sources = _normalize_evidence_entries(evidence_entries[:5], mode=fallback_mode)
     pipeline_metrics = _audit_pipeline_metrics_assess(
@@ -1504,6 +1949,7 @@ def _execute_assess_fast_body(encounter_id: str) -> dict | None:
         kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
         pipeline_metrics=pipeline_metrics,
+        actor_user_id=actor_user_id,
     )
     log_assessment_metrics(
         run_name=f"assess_fast_{encounter_id}",
@@ -1522,6 +1968,21 @@ def _execute_assess_fast_body(encounter_id: str) -> dict | None:
         },
     )
 
+    if _PROM_ASSESS_FAST:
+        _PROM_ASSESS_FAST.observe(time.perf_counter() - t0)
+    # region agent log
+    _perf_debug_064(
+        "H1",
+        "api/main.py:_execute_assess_fast_body",
+        "phase_timing",
+        pipeline="assess_fast",
+        encounter_id=encounter_id,
+        phase="total",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"degraded_mode": degraded_mode},
+    )
+    # endregion
+
     return {
         "encounter_id": encounter_id,
         "provider_used": "knowledge_graph_context",
@@ -1539,36 +2000,35 @@ def _execute_assess_fast_body(encounter_id: str) -> dict | None:
 
 
 @app.post("/encounters/{encounter_id}/assess-fast")
-def assess_fast(encounter_id: str):
-    out = _execute_assess_fast_body(encounter_id)
+def assess_fast(encounter_id: str, user: CurrentUser):
+    _assert_encounter_access(user, encounter_id)
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H6",
+        location="api/main.py:assess_fast:entry",
+        message="assess_fast_called",
+        data={"encounter_id": encounter_id, "actor_user_id_present": bool(user.sub)},
+    )
+    # endregion
+    out = _execute_assess_fast_body(encounter_id, actor_user_id=user.sub)
     if out is None:
         raise HTTPException(status_code=404, detail="Encounter not found")
     return out
 
 
-_agentic_graph = None
-
-
-def _get_agentic_assess_graph():
-    global _agentic_graph
-    if _agentic_graph is not None:
-        return _agentic_graph
-    try:
-        _agentic_graph = build_assess_graph(_execute_assess_fast_body)
-    except Exception:
-        _agentic_graph = False
-    return _agentic_graph
-
-
 @app.post("/encounters/{encounter_id}/assess-agentic")
-def assess_agentic(encounter_id: str):
+def assess_agentic(encounter_id: str, user: CurrentUser):
     """Same clinical output as assess-fast, routed through a LangGraph agent wrapper for comparison."""
-    graph = _get_agentic_assess_graph()
-    if graph is False or graph is None:
+    _assert_encounter_access(user, encounter_id)
+    try:
+        exec_fn = partial(_execute_assess_fast_body, actor_user_id=user.sub)
+        graph = build_assess_graph(exec_fn)
+    except Exception:
         raise HTTPException(
             status_code=503,
             detail="LangGraph not available. Install langgraph and langchain-core.",
-        )
+        ) from None
     final = graph.invoke({"encounter_id": encounter_id})
     payload = final.get("result")
     if payload is None:
@@ -1578,7 +2038,8 @@ def assess_agentic(encounter_id: str):
 
 
 @app.post("/encounters/{encounter_id}/assess-deep")
-def assess_deep(encounter_id: str):
+def assess_deep(encounter_id: str, user: CurrentUser):
+    _assert_encounter_access(user, encounter_id)
     ensure_clinical_tables()
     t0 = time.perf_counter()
     encounter = get_encounter(encounter_id)
@@ -1644,6 +2105,7 @@ def assess_deep(encounter_id: str):
         kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
         pipeline_metrics=pipeline_metrics,
+        actor_user_id=user.sub,
     )
     log_assessment_metrics(
         run_name=f"assess_deep_{encounter_id}",
@@ -1668,11 +2130,11 @@ def assess_deep(encounter_id: str):
 
 
 @app.post("/encounters/{encounter_id}/initial-assessment")
-def initial_assessment(encounter_id: str):
+def initial_assessment(encounter_id: str, user: CurrentUser):
     # Compatibility wrapper
     if CLINICAL_USE_CORTEX:
-        return assess_deep(encounter_id)
-    return assess_fast(encounter_id)
+        return assess_deep(encounter_id, user)
+    return assess_fast(encounter_id, user)
 
 
 def _top_differential_snapshot(encounter: dict, limit: int = 3) -> list[dict]:
@@ -1719,32 +2181,55 @@ def _followup_question_discriminative(encounter: dict, proposed_question: str) -
 
 
 @app.post("/encounters/{encounter_id}/next-question")
-def next_question(encounter_id: str):
+def next_question(encounter_id: str, user: CurrentUser):
+    _assert_encounter_access(user, encounter_id)
     ensure_clinical_tables()
     encounter = get_encounter(encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
 
     turn_no = next_turn_no(encounter_id)
-    question_text, policy_reason = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
+    question_text, policy_reason, answer_choices = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
     if not question_text:
         question_text = "What is the symptom timeline and which symptom started first?"
+        answer_choices = None
     if FOLLOWUP_SELF_CRITIQUE and not _followup_question_discriminative(encounter, question_text):
-        question_text, policy_reason = policy_next_question(
+        question_text, policy_reason, answer_choices = policy_next_question(
             encounter,
             max_turns=CLINICAL_MAX_TURNS,
             skip_questions=(question_text,),
         )
     add_question(encounter_id, turn_no, question_text)
-    return {"encounter_id": encounter_id, "turn_no": turn_no, "question": question_text, "policy_reason": policy_reason}
+    return {
+        "encounter_id": encounter_id,
+        "turn_no": turn_no,
+        "question": question_text,
+        "policy_reason": policy_reason,
+        "answer_choices": list(answer_choices) if answer_choices else None,
+    }
 
 
 @app.post("/encounters/{encounter_id}/answer")
 def answer_question(
     encounter_id: str,
     payload: EncounterAnswerRequest,
+    user: CurrentUser,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    _assert_encounter_access(user, encounter_id)
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H1",
+        location="api/main.py:answer_question:entry",
+        message="answer_request_received",
+        data={
+            "encounter_id": encounter_id,
+            "turn_no": int(payload.turn_no),
+            "answer_len": len((payload.answer or "").strip()),
+        },
+    )
+    # endregion
     ensure_clinical_tables()
     t0 = time.perf_counter()
     encounter = get_encounter(encounter_id)
@@ -1760,12 +2245,86 @@ def answer_question(
         if previous:
             return previous
 
+    # Persist answer first so get_encounter includes it in qa_history for token extraction.
+    add_answer(encounter_id, payload.turn_no, payload.answer)
+    ingest_followup_answer_tokens(encounter_id, payload.answer)
+    encounter = get_encounter(encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+
     previous_candidates = encounter.get("differential", [])[:12]
-    updated = get_encounter(encounter_id)
-    candidates, degraded_mode, errors = _attempt_rank_with_degradation(
-        encounter_id, encounter=updated or encounter, limit=12
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H3",
+        location="api/main.py:answer_question:before_rank",
+        message="previous_candidates_snapshot",
+        data={
+            "encounter_id": encounter_id,
+            "previous_count": len(previous_candidates),
+            "previous_top3": [
+                {
+                    "disease_name": c.get("disease_name"),
+                    "score": c.get("score"),
+                    "confidence_score": c.get("confidence_score"),
+                }
+                for c in previous_candidates[:3]
+            ],
+        },
     )
+    # endregion
+    candidates, degraded_mode, errors = _attempt_rank_with_degradation(
+        encounter_id, encounter=encounter, limit=12
+    )
+    # region agent log
+    _perf_debug_064(
+        "H2",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="after_rank",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"turn_no": int(payload.turn_no), "n_candidates": len(candidates)},
+    )
+    # endregion
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H3",
+        location="api/main.py:answer_question:after_rank",
+        message="new_candidates_snapshot",
+        data={
+            "encounter_id": encounter_id,
+            "new_count": len(candidates),
+            "degraded_mode": degraded_mode,
+            "errors_count": len(errors or []),
+            "new_top3": [
+                {
+                    "disease_name": c.get("disease_name"),
+                    "score": c.get("score"),
+                    "confidence_score": c.get("confidence_score"),
+                }
+                for c in candidates[:3]
+            ],
+        },
+    )
+    # endregion
+    t_kg = time.perf_counter()
     kg_version, kg_build_id, snapshot_ts = get_latest_kg_build_meta()
+    # region agent log
+    _perf_debug_064(
+        "H4",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="kg_meta_only",
+        elapsed_ms=(time.perf_counter() - t_kg) * 1000,
+        extra={"turn_no": int(payload.turn_no)},
+    )
+    # endregion
+    t_persist = time.perf_counter()
     answer_and_update_tx(
         encounter_id=encounter_id,
         turn_no=payload.turn_no,
@@ -1774,13 +2333,53 @@ def answer_question(
         kg_version=kg_version,
         kg_build_id=kg_build_id,
         source_snapshot_ts=snapshot_ts,
+        diff_previous=previous_candidates,
     )
-    save_diff_delta(encounter_id, payload.turn_no, previous_candidates, candidates)
-    contract = _build_contract_from_candidates(updated or encounter, candidates, latest_answer=payload.answer)
+    # region agent log
+    _perf_debug_064(
+        "H3",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="persist_block_tx_and_delta",
+        elapsed_ms=(time.perf_counter() - t_persist) * 1000,
+        extra={"turn_no": int(payload.turn_no)},
+    )
+    # endregion
+    contract = _build_contract_from_candidates(encounter, candidates, latest_answer=payload.answer)
     answer = contract_to_markdown(contract)
     provider = "knowledge_graph_context"
-    evidence_query = _build_differential_evidence_query(updated or encounter, candidates)
+    # region agent log
+    _perf_debug_064(
+        "H3",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="after_persist_and_contract",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"turn_no": int(payload.turn_no)},
+    )
+    # endregion
+    evidence_query = _build_differential_evidence_query(encounter, candidates)
     evidence_entries_ans, fallback_mode_ans = retrieve_evidence_journal_first(evidence_query, limit=12)
+    # region agent log
+    _perf_debug_064(
+        "H1",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="after_evidence_retrieval",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={
+            "turn_no": int(payload.turn_no),
+            "fallback_mode": fallback_mode_ans,
+            "n_evidence": len(evidence_entries_ans or []),
+        },
+    )
+    # endregion
     pipeline_metrics = _audit_pipeline_metrics_assess(
         candidates=candidates,
         errors=errors,
@@ -1796,12 +2395,13 @@ def answer_question(
         provider=provider,
         model_name="none",
         degraded_mode=degraded_mode,
-        context_text=_summarize_encounter_context(updated or encounter),
+        context_text=_summarize_encounter_context(encounter),
         output_text=answer,
         kg_version=kg_version or "v1",
         kg_build_id=kg_build_id or "seed_symptom_map",
         error_flags=errors,
         pipeline_metrics=pipeline_metrics,
+        actor_user_id=user.sub,
     )
     log_assessment_metrics(
         run_name=f"answer_{encounter_id}_t{payload.turn_no}",
@@ -1823,13 +2423,46 @@ def answer_question(
     response["evidence_summary"] = _short_evidence_summary(evidence_entries_ans, fallback_mode=fallback_mode_ans)
     response["evidence_sources"] = _normalize_evidence_entries(evidence_entries_ans[:5], mode=fallback_mode_ans)
     response["fallback_mode"] = fallback_mode_ans
+    # region agent log
+    _debug_log(
+        run_id="pre-fix",
+        hypothesis_id="H4",
+        location="api/main.py:answer_question:response",
+        message="answer_response_payload",
+        data={
+            "encounter_id": encounter_id,
+            "response_top_count": len(response.get("top_candidates") or []),
+            "response_top3": [
+                {
+                    "disease_name": c.get("disease_name"),
+                    "score": c.get("score"),
+                    "confidence_score": c.get("confidence_score"),
+                }
+                for c in (response.get("top_candidates") or [])[:3]
+            ],
+        },
+    )
+    # endregion
     if idempotency_key:
         store_idempotent_response("/encounters/answer", idempotency_key, req_hash, response)
+    # region agent log
+    _perf_debug_064(
+        "H1",
+        "api/main.py:answer_question",
+        "phase_timing",
+        pipeline="answer",
+        encounter_id=encounter_id,
+        phase="total",
+        elapsed_ms=(time.perf_counter() - t0) * 1000,
+        extra={"turn_no": int(payload.turn_no), "degraded_mode": degraded_mode},
+    )
+    # endregion
     return response
 
 
 @app.get("/encounters/{encounter_id}/context")
-def encounter_context(encounter_id: str):
+def encounter_context(encounter_id: str, user: CurrentUser):
+    _assert_encounter_access(user, encounter_id)
     ensure_clinical_tables()
     encounter = get_encounter(encounter_id)
     if not encounter:
@@ -1856,9 +2489,11 @@ def encounter_context(encounter_id: str):
 @app.get("/encounters/{encounter_id}/kg-preview")
 def encounter_kg_preview(
     encounter_id: str,
+    user: CurrentUser,
     max_edges: int = Query(2500, ge=1, le=5000, description="Safety cap on rows; all matching diseases included up to this limit"),
 ):
     """All HAS_SYMPTOM disease–symptom pairs for this encounter’s symptoms (bounded by max_edges)."""
+    _assert_encounter_access(user, encounter_id)
     ensure_clinical_tables()
     encounter = get_encounter(encounter_id)
     if not encounter:
@@ -1877,13 +2512,82 @@ def encounter_kg_preview(
     return get_encounter_kg_preview(encounter_id, max_edges=max_edges)
 
 
+def _latest_differential_as_candidates(encounter: dict) -> list[dict]:
+    diff = encounter.get("differential") or []
+    if not diff:
+        return []
+    iterations = [int(d.get("iteration") or 0) for d in diff]
+    max_it = max(iterations)
+    rows = [d for d in diff if int(d.get("iteration") or 0) == max_it]
+    rows.sort(key=lambda x: int(x.get("rank_no") or 999))
+    out: list[dict] = []
+    for d in rows:
+        out.append(
+            {
+                "disease_name": d.get("disease_name"),
+                "disease_code": d.get("disease_code"),
+                "score": d.get("score"),
+                "rationale": d.get("rationale"),
+                "source": d.get("source"),
+            }
+        )
+    return out
+
+
+@app.get("/encounters/{encounter_id}/report.pdf")
+def encounter_report_pdf(encounter_id: str, user: CurrentUser):
+    """Download a PDF summary for the encounter (doctor: own; admin: org)."""
+    enc = _assert_encounter_access(user, encounter_id)
+    cands = _latest_differential_as_candidates(enc)
+    kg_version, kg_build_id, _snap = get_latest_kg_build_meta()
+    evidence_summary = ""
+    fallback_mode: str | None = None
+    if cands:
+        eq = _build_differential_evidence_query(enc, cands)
+        ev, fallback_mode = retrieve_evidence_journal_first(eq, limit=8)
+        evidence_summary = _short_evidence_summary(ev, fallback_mode=fallback_mode or "journal_first")
+    contract = _build_contract_from_candidates(enc, cands[:12] if cands else [])
+    assessment_markdown = contract_to_markdown(contract)
+    pdf_bytes = build_encounter_pdf(
+        encounter_id=encounter_id,
+        encounter=enc,
+        assessment_markdown=assessment_markdown,
+        top_candidates=cands[:8] if cands else [],
+        evidence_summary=evidence_summary or None,
+        kg_version=kg_version,
+        kg_build_id=kg_build_id,
+        fallback_mode=fallback_mode,
+        org_id=enc.get("org_id"),
+    )
+    append_audit_row(
+        encounter_id=encounter_id,
+        turn_no=0,
+        action="export_pdf",
+        provider="pdf",
+        model_name="none",
+        degraded_mode="none",
+        context_text="",
+        output_text="pdf_generated",
+        kg_version=kg_version or "v1",
+        kg_build_id=kg_build_id or "seed_symptom_map",
+        error_flags=[],
+        pipeline_metrics={"bytes": len(pdf_bytes)},
+        actor_user_id=user.sub,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="medassist-encounter-{encounter_id}.pdf"'},
+    )
+
+
 # ---- Option B: Answer from GCS documents via Vertex AI Search ----
 # Requires a Vertex AI Search data store created from gs://medassist-data-gcs/medassist/
 # See OPTION_B_SETUP.md. Set VERTEX_AI_DATASTORE_PATH or VERTEX_AI_DATASTORE_ID.
 
 
 @app.post("/ask-gcs")
-def ask_gcs(question: Question):
+def ask_gcs(question: Question, user: CurrentUser):
     """
     Answer a clinical question using only documents in your GCS bucket, via Vertex AI Search
     grounding. No Snowflake. Requires a data store created in AI Applications (see OPTION_B_SETUP.md).
