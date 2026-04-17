@@ -14,9 +14,13 @@ def test_followup_policy_avoids_repeat():
             }
         ],
     }
-    q, reason = next_question(encounter, max_turns=5)
+    q, reason, choices = next_question(encounter, max_turns=5)
     assert "highest documented" not in q.lower()
     assert reason in {"default", "differential_narrowing", "information_gain_rule"}
+    if reason == "information_gain_rule":
+        assert choices is not None and len(choices) > 0
+    else:
+        assert choices is None
 
 
 def test_skip_questions_falls_through():
@@ -24,10 +28,12 @@ def test_skip_questions_falls_through():
         "symptoms": [{"symptom": "fever"}],
         "qa_history": [],
     }
-    first, _ = next_question(encounter, max_turns=5)
-    second, reason = next_question(encounter, max_turns=5, skip_questions=(first,))
+    first, _, _ = next_question(encounter, max_turns=5)
+    second, reason, ch2 = next_question(encounter, max_turns=5, skip_questions=(first,))
     assert second != first
     assert reason in {"information_gain_rule", "differential_narrowing", "default", "default_after_skip"}
+    if reason == "information_gain_rule":
+        assert ch2 is not None
 
 
 def test_differential_narrowing_when_no_symptom_rule():
@@ -40,6 +46,21 @@ def test_differential_narrowing_when_no_symptom_rule():
             {"iteration": 1, "rank_no": 2, "disease_name": "Condition B"},
         ],
     }
-    q, reason = next_question(encounter, max_turns=5)
+    q, reason, choices = next_question(encounter, max_turns=5)
     assert "Condition A" in q and "Condition B" in q
     assert reason == "differential_narrowing"
+    assert choices is None
+
+
+def test_chest_pain_rule_returns_answer_choices():
+    encounter = {
+        "symptoms": [{"symptom": "chest pain"}],
+        "qa_history": [],
+    }
+    q, reason, choices = next_question(encounter, max_turns=5)
+    assert reason == "information_gain_rule"
+    assert "pleuritic" in q.lower()
+    assert choices is not None
+    assert "Pleuritic" in choices
+    assert "Exertional" in choices
+    assert "Pressure-like" in choices

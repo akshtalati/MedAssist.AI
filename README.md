@@ -17,6 +17,8 @@ The primary clinician experience is a **single Streamlit workspace** ([`streamli
 
 The API root **`GET /`** redirects to Streamlit (`STREAMLIT_PUBLIC_URL`, default `http://127.0.0.1:8501`).
 
+The **doctor UI is Streamlit only** ([`streamlit_app.py`](streamlit_app.py)). There is no separate React/Vite frontend. Local demo runs the API with **`AUTH_DISABLED=1`** (see [`.env.example`](.env.example)) so the Streamlit app does not need JWT login; set **`AUTH_DISABLED=0`** and use **`/auth/login`** + Bearer tokens if you need authenticated API access.
+
 **Run locally (API + Streamlit):**
 
 ```bash
@@ -24,7 +26,7 @@ The API root **`GET /`** redirects to Streamlit (`STREAMLIT_PUBLIC_URL`, default
 ```
 
 - **Doctor UI:** `http://127.0.0.1:8501`
-- **API + OpenAPI:** `http://127.0.0.1:8000` and `http://127.0.0.1:8000/docs`
+- **API + OpenAPI:** (port chosen automatically, often `8000`) — `/docs` on the same base URL printed by the script
 
 **Observability:** Prometheus metrics at [`http://127.0.0.1:8000/metrics`](http://127.0.0.1:8000/metrics) (when `prometheus-fastapi-instrumentator` loads). Optional **MLflow** via `MLFLOW_TRACKING_URI` (default `file:./mlruns`); set `MLFLOW_DISABLE=1` to turn off. **Analytics:** dbt marts over `CLINICAL.ENCOUNTER_AUDIT.pipeline_metrics` — see `dbt/models/marts/`.
 
@@ -62,6 +64,7 @@ The API root **`GET /`** redirects to Streamlit (`STREAMLIT_PUBLIC_URL`, default
 
 ### UI/UX (doctor workspace)
 
+- **Streamlit-only UI** — no React/Vite client; local demo uses **`AUTH_DISABLED=1`** so there is no login screen (see [`.env.example`](.env.example) and [`streamlit_app.py`](streamlit_app.py)).
 - **No fast/deep toggle** in the main flow: single deterministic **assess-fast** path for consistency.
 - **Compact assessment** on screen; full markdown in an expander.
 - **Follow-up chat** using `st.chat_input`; no long “full chart context” blob appended to every question (context lives in the encounter record).
@@ -254,13 +257,17 @@ Differentials returned to the UI include **`kg_version`** / **`kg_build_id`** wh
 | `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` | Snowflake auth |
 | `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA` | Defaults |
 | `SNOWFLAKE_AUTHENTICATOR` | Optional SSO / external browser |
+| `AUTH_DISABLED` | `1` = API accepts requests without `Authorization: Bearer` (default in `./scripts/start_presentation.sh` and `docker compose` for Streamlit-first local use). `0` = JWT required. |
+| `JWT_SECRET`, `JWT_EXPIRE_MINUTES` | Signed tokens when auth is enabled (`api/auth.py`) |
+| `MEDASSIST_STREAMLIT_ROLE` | `doctor` or `admin` — controls optional **Admin · Quality** tab in Streamlit (UI only; API role still comes from JWT or `AUTH_DISABLED_ROLE`) |
 | `STREAMLIT_PUBLIC_URL` | Where `/` redirects (default `http://127.0.0.1:8501`) |
-| `MEDASSIST_API_BASE` | Base URL for scripts calling the API |
+| `MEDASSIST_API_BASE` | Base URL Streamlit and scripts use to call the API |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed by the API (default includes Streamlit on port **8501**) |
 | `VERTEX_AI_DATASTORE_PATH` or `VERTEX_AI_DATASTORE_ID` | `/ask-gcs` grounding |
 | `CLINICAL_USE_CORTEX` | `1` makes `initial-assessment` wrapper prefer deep path |
 | `CLINICAL_MAX_TURNS` | Max follow-up turns |
 
-Create a **`.env`** in the project root (see `src/config.py` / dotenv usage in your setup).
+Create a **`.env`** in the project root (see [`.env.example`](.env.example)).
 
 ---
 
@@ -332,7 +339,8 @@ See also [`scripts/pre_release_check.sh`](scripts/pre_release_check.sh).
 
 - Run API: `uvicorn api.main:app --host 0.0.0.0 --port 8000` (or behind a process manager).
 - Set **`STREAMLIT_PUBLIC_URL`** to your **public Streamlit URL** so `/` redirects correctly.
-- Run Streamlit separately or via the same host; ensure CORS/network paths allow the browser to reach the API.
+- Run Streamlit separately or via the same host. Server-side `requests` from Streamlit to the API do not use browser CORS; set **`CORS_ORIGINS`** if you add other browser clients.
+- For production, prefer **`AUTH_DISABLED=0`**, issue JWTs via **`POST /auth/login`**, and pass **`Authorization: Bearer …`** from clients that support it (the stock Streamlit app is oriented toward **`AUTH_DISABLED=1`** for demos).
 - Inject Snowflake and GCP secrets via your platform’s secret manager.
 - Populate **`NORMALIZED.SYMPTOM_DISEASE_MAP`** and seed **`KNOWLEDGE_GRAPH`** before relying on KG differentials in production.
 

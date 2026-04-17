@@ -3,7 +3,7 @@
 This document has two views:
 
 1. **Data platform** — ingestion, local staging, Snowflake, indexing (original diagram, refined).
-2. **Application runtime** — FastAPI + Streamlit doctor workspace, evidence tiers, and KG differential (current product path).
+2. **Application runtime** — FastAPI + **Streamlit-only** doctor workspace (no React/Vite SPA), evidence tiers, and KG differential (current product path).
 
 ---
 

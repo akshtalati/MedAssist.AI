@@ -7,26 +7,208 @@ from typing import Any
 
 MAX_TURNS_DEFAULT = 25
 
-# Ordered: symptom keyword in encounter → one focused clinical question (avoid duplicates via asked_text).
-QUESTION_RULES = [
-    ("fever", "What is the highest documented temperature, and have there been rigors, night sweats, or focal infection symptoms?"),
-    ("headache", "Is there neck stiffness, photophobia, confusion, focal weakness, or a thunderclap onset?"),
-    ("vomiting", "Is emesis bilious or bloody, and is the patient tolerating oral fluids?"),
-    ("nausea", "Any associated abdominal pain, recent medications or toxins, and can they keep fluids down?"),
-    ("chest pain", "Is the pain pleuritic, exertional, or pressure-like, and are there associated diaphoresis or radiation?"),
-    ("shortness of breath", "What are the current SpO₂ and respiratory rate at rest, and any orthopnea or pleuritic pain?"),
-    ("abdominal pain", "Where is the pain localized, is peritoneal irritation suggested, and any obstipation or melena?"),
-    ("seizure", "Was there witnessed tonic-clonic activity, postictal confusion, tongue bite, or first-ever seizure at this age?"),
-    ("cough", "Is the cough productive, any hemoptysis, and duration acute vs subacute vs chronic?"),
-    ("rash", "Describe morphology and distribution, pruritus, mucosal involvement, and recent new drugs or exposures?"),
-    ("fatigue", "Is fatigue acute vs chronic, any weight loss, night sweats, or bleeding to suggest malignancy or anemia?"),
-    ("dizziness", "Is vertigo true spinning vs presyncope, and any focal neuro signs or recent otologic symptoms?"),
-    ("vision changes", "Monocular vs binocular, sudden vs gradual, and any eye pain or neurologic deficits?"),
-    ("confusion", "Acute change from baseline, attention deficits, infection exposure, toxins, or metabolic triggers?"),
-    ("joint pain", "Pattern (mono vs poly), symmetry, morning stiffness, and any recent infection or travel?"),
-    ("diarrhea", "Stool frequency, blood or mucus, recent antibiotics, travel, or sick contacts?"),
-    ("syncope", "Prodrome, exertional trigger, cardiac history, and any injury from the fall?"),
-    ("palpitations", "Regular vs irregular, sustained episodes, associated chest pain or syncope?"),
+# Ordered: symptom keyword → question + short UI answer choices (Streamlit adds "None of the above").
+# Choices are disjoint labels persisted as the clinician answer string prefix "Selected: …".
+QUESTION_RULES: list[tuple[str, str, tuple[str, ...]]] = [
+    (
+        "fever",
+        "What is the highest documented temperature, and have there been rigors, night sweats, or focal infection symptoms?",
+        (
+            "Documented fever with rigors or night sweats",
+            "Fever without rigors or night sweats",
+            "No documented fever / subjective only",
+            "Unknown temperature / not measured",
+        ),
+    ),
+    (
+        "headache",
+        "Is there neck stiffness, photophobia, confusion, focal weakness, or a thunderclap onset?",
+        (
+            "Neck stiffness and/or photophobia",
+            "Thunderclap / sudden severe onset",
+            "Focal weakness or confusion",
+            "None of those features",
+            "Mixed / unsure",
+        ),
+    ),
+    (
+        "vomiting",
+        "Is emesis bilious or bloody, and is the patient tolerating oral fluids?",
+        (
+            "Bilious emesis",
+            "Bloody emesis",
+            "Non-bilious, tolerating sips",
+            "Cannot keep fluids down",
+            "Unknown / mixed",
+        ),
+    ),
+    (
+        "nausea",
+        "Any associated abdominal pain, recent medications or toxins, and can they keep fluids down?",
+        (
+            "With abdominal pain",
+            "Recent new medication or toxin concern",
+            "Keeping fluids down",
+            "Cannot keep fluids down",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "chest pain",
+        "Is the pain pleuritic, exertional, or pressure-like, and are there associated diaphoresis or radiation?",
+        (
+            "Pleuritic",
+            "Exertional",
+            "Pressure-like",
+            "Diaphoresis or radiation",
+            "Mixed pattern / unsure",
+        ),
+    ),
+    (
+        "shortness of breath",
+        "What are the current SpO₂ and respiratory rate at rest, and any orthopnea or pleuritic pain?",
+        (
+            "SpO₂ and RR documented at rest",
+            "Orthopnea present",
+            "Pleuritic component",
+            "Vitals not yet available",
+            "Mixed / other",
+        ),
+    ),
+    (
+        "abdominal pain",
+        "Where is the pain localized, is peritoneal irritation suggested, and any obstipation or melena?",
+        (
+            "Localized pain (can point to quadrant)",
+            "Diffuse pain",
+            "Peritoneal signs suspected",
+            "Obstipation or melena",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "seizure",
+        "Was there witnessed tonic-clonic activity, postictal confusion, tongue bite, or first-ever seizure at this age?",
+        (
+            "Witnessed tonic-clonic activity",
+            "Postictal confusion",
+            "Tongue bite reported",
+            "First-ever seizure at this age",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "cough",
+        "Is the cough productive, any hemoptysis, and duration acute vs subacute vs chronic?",
+        (
+            "Productive cough",
+            "Hemoptysis",
+            "Acute duration (<3 weeks)",
+            "Subacute or chronic",
+            "Unknown / mixed",
+        ),
+    ),
+    (
+        "rash",
+        "Describe morphology and distribution, pruritus, mucosal involvement, and recent new drugs or exposures?",
+        (
+            "New drug or exposure in timeline",
+            "Pruritic rash",
+            "Mucosal involvement",
+            "Morphology/distribution documented",
+            "None of those yet / unsure",
+        ),
+    ),
+    (
+        "fatigue",
+        "Is fatigue acute vs chronic, any weight loss, night sweats, or bleeding to suggest malignancy or anemia?",
+        (
+            "Acute fatigue",
+            "Chronic fatigue",
+            "Weight loss or night sweats",
+            "Bleeding symptoms",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "dizziness",
+        "Is vertigo true spinning vs presyncope, and any focal neuro signs or recent otologic symptoms?",
+        (
+            "True spinning vertigo",
+            "Presyncope / lightheadedness",
+            "Focal neuro signs",
+            "Recent otologic symptoms",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "vision changes",
+        "Monocular vs binocular, sudden vs gradual, and any eye pain or neurologic deficits?",
+        (
+            "Monocular",
+            "Binocular",
+            "Sudden onset",
+            "Gradual onset",
+            "Eye pain or neuro deficits",
+            "Mixed / unsure",
+        ),
+    ),
+    (
+        "confusion",
+        "Acute change from baseline, attention deficits, infection exposure, toxins, or metabolic triggers?",
+        (
+            "Acute change from baseline",
+            "Infection exposure concern",
+            "Toxin or substance concern",
+            "Metabolic trigger suspected",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "joint pain",
+        "Pattern (mono vs poly), symmetry, morning stiffness, and any recent infection or travel?",
+        (
+            "Monoarticular",
+            "Polyarticular",
+            "Symmetric pattern",
+            "Morning stiffness prominent",
+            "Recent infection or travel",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "diarrhea",
+        "Stool frequency, blood or mucus, recent antibiotics, travel, or sick contacts?",
+        (
+            "Blood or mucus in stool",
+            "Recent antibiotics",
+            "Travel or sick contacts",
+            "High stool frequency",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "syncope",
+        "Prodrome, exertional trigger, cardiac history, and any injury from the fall?",
+        (
+            "Prodrome reported",
+            "Exertional trigger",
+            "Significant cardiac history",
+            "Injury from fall",
+            "None of those / unsure",
+        ),
+    ),
+    (
+        "palpitations",
+        "Regular vs irregular, sustained episodes, associated chest pain or syncope?",
+        (
+            "Regular rhythm sensation",
+            "Irregular rhythm sensation",
+            "Sustained episodes",
+            "With chest pain or syncope",
+            "None of those / unsure",
+        ),
+    ),
 ]
 
 
@@ -70,18 +252,22 @@ def next_question(
     encounter: dict[str, Any],
     max_turns: int = MAX_TURNS_DEFAULT,
     skip_questions: tuple[str, ...] = (),
-) -> tuple[str, str]:
+) -> tuple[str, str, tuple[str, ...] | None]:
     qa_history = encounter.get("qa_history", [])
     if len(qa_history) >= max_turns:
-        return "Maximum follow-up turns reached for this encounter. Summarize and consider disposition or further workup.", "max_turns"
+        return (
+            "Maximum follow-up turns reached for this encounter. Summarize and consider disposition or further workup.",
+            "max_turns",
+            None,
+        )
 
     symptoms = [str(s.get("symptom", "")).lower() for s in encounter.get("symptoms", [])]
     asked_text = " ".join((q.get("question") or "").lower() for q in qa_history)
 
-    for trigger, question in QUESTION_RULES:
+    for trigger, question, choices in QUESTION_RULES:
         if trigger in symptoms and not _already_asked(asked_text, question):
             if not _matches_skip(question, skip_questions):
-                return question, "information_gain_rule"
+                return question, "information_gain_rule", choices
 
     diff_rows = _latest_differential_rows(encounter.get("differential") or [])
     names: list[str] = []
@@ -98,7 +284,7 @@ def next_question(
             "what single history detail, vital sign, or focused exam finding would most help discriminate?"
         )
         if not _already_asked(asked_text, q) and not _matches_skip(q, skip_questions):
-            return q, "differential_narrowing"
+            return q, "differential_narrowing", None
 
     if len(names) == 1:
         q = (
@@ -106,18 +292,19 @@ def next_question(
             "(timeline, exposures, vitals, medications, pregnancy status, or targeted exam) that would change management?"
         )
         if not _already_asked(asked_text, q) and not _matches_skip(q, skip_questions):
-            return q, "differential_narrowing"
+            return q, "differential_narrowing", None
 
     default_q = (
         "In one minute: which symptom began first, how has severity changed over the last 24–48 hours, "
         "and what is the patient’s baseline functional status?"
     )
     if not _matches_skip(default_q, skip_questions):
-        return default_q, "default"
+        return default_q, "default", None
 
     return (
         "What are the patient’s current vital signs, and have there been any new neuro, chest, or abdominal red flags since intake?",
         "default_after_skip",
+        None,
     )
 
 

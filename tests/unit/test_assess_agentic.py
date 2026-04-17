@@ -27,7 +27,7 @@ def test_assess_agentic_adds_trace(monkeypatch):
                 "agent_trace": ["langgraph:deterministic_assess"],
             }
 
-    monkeypatch.setattr(main, "_get_agentic_assess_graph", lambda: _FakeGraph())
+    monkeypatch.setattr(main, "build_assess_graph", lambda _fn: _FakeGraph())
     client = TestClient(main.app)
     res = client.post("/encounters/enc-1/assess-agentic")
     assert res.status_code == 200
@@ -43,7 +43,7 @@ def test_assess_agentic_404_when_missing_encounter(monkeypatch):
         def invoke(self, state):
             return {"result": None, "agent_trace": []}
 
-    monkeypatch.setattr(main, "_get_agentic_assess_graph", lambda: _FakeGraph())
+    monkeypatch.setattr(main, "build_assess_graph", lambda _fn: _FakeGraph())
     client = TestClient(main.app)
     res = client.post("/encounters/missing/assess-agentic")
     assert res.status_code == 404
