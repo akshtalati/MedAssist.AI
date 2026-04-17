@@ -1,0 +1,115 @@
+{
+  "mode": "snowflake-coverage",
+  "summary": {
+    "pass": 8,
+    "warn": 0,
+    "fail": 7
+  },
+  "tables": [
+    {
+      "table": "RAW.PUBMED_ARTICLES",
+      "count": 4997,
+      "threshold": 1000,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.PMC_ARTICLES",
+      "count": 5000,
+      "threshold": 500,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.OPENFDA_LABELS",
+      "count": 0,
+      "threshold": 100,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.OPENFDA_EVENTS",
+      "count": 14901,
+      "threshold": 100,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.OPENFDA_NDC",
+      "count": 0,
+      "threshold": 100,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.RXNORM_DRUGS",
+      "count": 129,
+      "threshold": 100,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.WHO_DOCUMENTS",
+      "count": 0,
+      "threshold": 50,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.NCBI_BOOKSHELF",
+      "count": 100,
+      "threshold": 100,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.OPENSTAX_BOOKS",
+      "count": 1215,
+      "threshold": 100,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.ORPHANET_DISEASES",
+      "count": 0,
+      "threshold": 100,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.ORPHANET_PHENOTYPES",
+      "count": 0,
+      "threshold": 100,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.ORPHANET_GENES",
+      "count": 0,
+      "threshold": 100,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "RAW.ORPHANET_WEB_PAGES",
+      "count": 0,
+      "threshold": 10,
+      "status": "fail",
+      "reason": "Empty table"
+    },
+    {
+      "table": "NORMALIZED.SYMPTOM_DISEASE_MAP",
+      "count": 231706,
+      "threshold": 1000,
+      "status": "pass",
+      "reason": ""
+    },
+    {
+      "table": "RAW.FETCH_MANIFESTS",
+      "count": 50,
+      "threshold": 1,
+      "status": "pass",
+      "reason": ""
+    }
+  ]
+}

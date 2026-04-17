@@ -16,19 +16,28 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SQL_PATH = PROJECT_ROOT / "scripts" / "snowflake_setup.sql"
 
 
+def _split_sql_statements(sql: str) -> list[str]:
+    statements: list[str] = []
+    for chunk in sql.split(";"):
+        cleaned_lines: list[str] = []
+        for line in chunk.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--"):
+                continue
+            cleaned_lines.append(line)
+        stmt = "\n".join(cleaned_lines).strip()
+        if stmt:
+            statements.append(stmt)
+    return statements
+
+
 def main():
     if not SQL_PATH.exists():
         print(f"SQL file not found: {SQL_PATH}")
         sys.exit(1)
 
-    sql = SQL_PATH.read_text()
-
-    # Split by semicolon; skip empty and comment-only statements
-    statements = [
-        s.strip()
-        for s in sql.split(";")
-        if s.strip() and not s.strip().startswith("--")
-    ]
+    sql = SQL_PATH.read_text(encoding="utf-8")
+    statements = _split_sql_statements(sql)
 
     conn = get_connection()
     cursor = conn.cursor()

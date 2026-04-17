@@ -7,6 +7,7 @@ Checkpoint: data/.fetch_checkpoint.json
 
 import json
 import sys
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -15,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 CHECKPOINT_FILE = PROJECT_ROOT / "data" / ".fetch_checkpoint.json"
 
 # Higher limits for more data (adjust if you hit timeouts/rate limits)
-CONFIG = [
+CONFIG_DEFAULT = [
     ("orphanet", "Orphanet", {"dataset": "phenotypes"}),
     ("pubmed", "PubMed", {"term": "rare disease", "max_records": 5000}),
     ("pmc", "PMC", {"term": "rare disease", "max_records": 2000}),
@@ -27,6 +28,20 @@ CONFIG = [
     ("openstax", "OpenStax (pharmacology)", {"book": "pharmacology"}),
 ]
 
+CONFIG_FULL = [
+    ("orphanet_phenotypes", "Orphanet phenotypes", {"dataset": "phenotypes"}),
+    ("orphanet_diseases", "Orphanet diseases", {"dataset": "diseases"}),
+    ("orphanet_genes", "Orphanet genes", {"dataset": "genes"}),
+    ("pubmed", "PubMed", {"term": "rare disease OR differential diagnosis OR red flag", "max_records": 10000}),
+    ("pmc", "PMC", {"term": "rare disease OR differential diagnosis OR red flag", "max_records": 5000}),
+    ("openfda_label", "OpenFDA (labels)", {"endpoint": "label", "max_records": 50000}),
+    ("openfda_event", "OpenFDA (events)", {"endpoint": "event", "max_records": 50000}),
+    ("openfda_ndc", "OpenFDA (ndc)", {"endpoint": "ndc", "max_records": 50000}),
+    ("rxnorm", "RxNorm", {"query": "aspirin", "max_records": 2000}),
+    ("who", "WHO", {"endpoint": "documents", "limit": 1000}),
+    ("ncbi_bookshelf", "NCBI Bookshelf", {"term": "differential diagnosis", "max_records": 1000}),
+    ("openstax", "OpenStax (pharmacology)", {"book": "pharmacology"}),
+]
 
 def load_checkpoint():
     if CHECKPOINT_FILE.exists():
@@ -58,28 +73,43 @@ def main():
 
     fetcher_map = {
         "orphanet": OrphanetFetcher(),
+        "orphanet_phenotypes": OrphanetFetcher(),
+        "orphanet_diseases": OrphanetFetcher(),
+        "orphanet_genes": OrphanetFetcher(),
         "pubmed": PubMedFetcher(),
         "pmc": PMCFetcher(),
         "openfda_label": OpenFDAFetcher(),
         "openfda_event": OpenFDAFetcher(),
+        "openfda_ndc": OpenFDAFetcher(),
         "rxnorm": RxNormFetcher(),
         "who": WHOFetcher(),
         "ncbi_bookshelf": NCBIBookshelfFetcher(),
         "openstax": OpenStaxFetcher(),
     }
 
+    ap = argparse.ArgumentParser(description="Checkpointed fetch across sources")
+    ap.add_argument("--reset", action="store_true", help="Reset checkpoint before fetch.")
+    ap.add_argument(
+        "--profile",
+        choices=("default", "full"),
+        default="default",
+        help="default=lighter fetch, full=all supported source variants with larger limits.",
+    )
+    args = ap.parse_args()
+
+    config = CONFIG_FULL if args.profile == "full" else CONFIG_DEFAULT
+
     cp = load_checkpoint()
     completed = list(cp.get("completed", []))
     if cp.get("last_error"):
         print(f"Resuming after last error: {cp['last_error'][:200]}")
 
-    reset = "--reset" in sys.argv
-    if reset:
+    if args.reset:
         completed = []
         save_checkpoint(completed, None)
         print("Fetch checkpoint reset.")
 
-    for key, name, kwargs in CONFIG:
+    for key, name, kwargs in config:
         if key in completed:
             print(f"[skip] {name} (already done)")
             continue

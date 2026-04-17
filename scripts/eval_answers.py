@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -41,22 +40,14 @@ except ImportError:
 # Default base URL for the API (no changes to your code)
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 
-# Sections we expect in MedAssist answers (flexible: markdown, numbered list, or plain)
-REQUIRED_SECTIONS = [
-    ("summary", r"Summary"),
-    ("differential", r"Common\s+Differential\s+Diagnosis|Differential\s+Diagnosis"),
-    ("rare_diseases", r"Rare\s+Diseases|Orphanet"),
-    ("red_flags", r"Red[- ]Flag|Red-Flag\s+Features"),
-    ("next_steps", r"Suggested\s+Next\s+Steps|Next\s+Steps"),
-    ("references", r"References|\*\*References\*\*"),
-]
+from scripts.eval_common import eval_answer_structure
 
 
-def call_ask_both(base_url: str, question: str) -> dict:
+def call_ask_both(base_url: str, question: str, brief: bool = False) -> dict:
     """POST /ask-both -> { answer_gemini, answer_cortex }."""
     r = requests.post(
         f"{base_url}/ask-both",
-        json={"question": question},
+        json={"question": question, "brief": brief},
         timeout=120,
     )
     r.raise_for_status()
@@ -75,25 +66,8 @@ def call_ask(base_url: str, question: str, brief: bool = False) -> dict:
 
 
 def eval_answer(text: str, label: str) -> dict:
-    """Run simple evals on one answer. Returns a small dict of scores/checks."""
-    if not (text or "").strip():
-        return {"label": label, "ok": False, "error": "empty answer", "sections": {}}
-
-    text = text.strip()
-    sections = {}
-    for name, pattern in REQUIRED_SECTIONS:
-        sections[name] = bool(re.search(pattern, text, re.IGNORECASE))
-
-    all_present = all(sections.values())
-    word_count = len(text.split())
-
-    return {
-        "label": label,
-        "ok": all_present,
-        "sections": sections,
-        "word_count": word_count,
-        "has_content": word_count >= 50,
-    }
+    """Backward-compatible alias to shared evaluator."""
+    return eval_answer_structure(text, label)
 
 
 def judge_answers(question: str, answer_gemini: str, answer_cortex: str) -> dict | None:

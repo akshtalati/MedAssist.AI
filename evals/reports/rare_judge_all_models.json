@@ -1,0 +1,59 @@
+{
+  "mode": "rare-judge",
+  "disease": "Wilson disease",
+  "judge_model": "claude-sonnet-4-6",
+  "models_requested": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "openai-gpt-4.1-mini",
+    "llama3.1-70b",
+    "mistral-large2"
+  ],
+  "models_answered": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "llama3.1-70b",
+    "mistral-large2"
+  ],
+  "models_failed": {
+    "openai-gpt-4.1-mini": "100351 (P0000): Request failed for external function COMPLETE$V6 with remote service error: 400 '\"Model \\\"openai-gpt-4.1-mini\\\" is unavailable\"\n'; requests batch-id: 01c3c27f-0308-8252-001a-e44300960736:1:1:0:0; request batch size: 1 rows; request retries: 0; response time (last retry): 15.31ms"
+  },
+  "winner": "claude-sonnet-4-6",
+  "ranking": [
+    "claude-sonnet-4-6",
+    "mistral-large2",
+    "openai-gpt-4.1",
+    "llama3.1-70b"
+  ],
+  "judge": {
+    "judge_model": "claude-sonnet-4-6",
+    "raw": "```json\n{\n  \"winner\": \"claude-sonnet-4-6\",\n  \"ranking\": [\n    \"claude-sonnet-4-6\",\n    \"mistral-large2\",\n    \"openai-gpt-4.1\",\n    \"llama3.1-70b\"\n  ],\n  \"scores\": {\n    \"claude-sonnet-4-6\": 9.2,\n    \"openai-gpt-4.1\": 7.1,\n    \"mistral-large2\": 6.8,\n    \"llama3.1-70b\": 5.2\n  },\n  \"rationale\": {\n    \"claude-sonnet-4-6\": \"Exceptional depth and clinical accuracy throughout. Provides the full Leipzig scoring system with exact thresholds and scoring weights \u2014 a critical diagnostic tool absent in all other models. Correctly distinguishes ceruloplasmin as an acute-phase reactant that can be falsely normal. Accurately notes that neurological WD can paradoxically worsen with chelation initiation (~20-50% with penicillamine), a critical safety point missed by all others. Correctly identifies tetrathiomolybdate as an emerging option for acute neurological WD. Specifies that neuropsychiatric WD alone is not a standard transplant indication. Includes pediatric dosing caveats, pregnancy management note, and family screening protocol. Uncertainty handling is exemplary \u2014 explicitly flags missing case data while still providing actionable population-level guidance. Structure is superior with tables, code blocks, and clear visual hierarchy. Minor gap: does not specify the Revised Wilson Index for transplant prognostication in ALF.\",\n    \"openai-gpt-4.1\": \"Clinically accurate and well-organized but lacks depth compared to claude-sonnet-4-6. Correctly lists key diagnostic criteria and management principles. Does not include the Leipzig scoring system, which is the validated diagnostic framework recommended by EASL/AASLD. Does not mention neurological worsening risk with penicillamine initiation \u2014 a significant safety omission. Zinc therapy correctly noted as alternative but not adequately contextualized (not sufficient as sole agent in symptomatic disease). Differential is reasonable but superficial. Uncertainty handling is adequate with a brief note on missing case data. References are appropriate and correctly cited.\",\n    \"mistral-large2\": \"Structurally clean and covers the major domains. Correctly identifies key diagnostic tests and management agents. However, contains a notable clinical inaccuracy: lists hemochromatosis as a differential without noting that hemochromatosis causes iron overload, not copper \u2014 while it is a valid differential for liver disease, the framing lacks precision. Does not include Leipzig scoring. Does not address the neurological worsening risk with chelation. Dietary advice (avoid shellfish, nuts, chocolate) is clinically appropriate but presented without context of its secondary role. Safety red flags section is reasonable. Acknowledges missing case data appropriately. Overall competent but lacks the clinical granularity needed for rare disease decision support.\",\n    \"llama3.1-70b\": \"Contains a significant clinical inaccuracy that reduces its safety score: states 'Normal ceruloplasmin levels can be seen in some cases of Wilson disease, particularly in the early stages' as an argument AGAINST the diagnosis \u2014 this is misleading framing. Normal ceruloplasmin does not argue against WD; it is a known limitation of the test (ceruloplasmin is an acute-phase reactant and can be falsely normal in up to 15-36% of hepatic WD). The model also fabricates specific case findings ('elevated liver enzymes,' 'presence of Kayser-Fleischer rings,' 'neurological symptoms') that were not provided in the case \u2014 this is a hallucination risk in clinical AI and a serious concern. Does not include Leipzig scoring. Management section is generic. References are appropriate. The hallucination of case-specific findings is the most serious flaw and significantly reduces trustworthiness.\"\n  }\n}\n```",
+    "parsed": {
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "mistral-large2",
+        "openai-gpt-4.1",
+        "llama3.1-70b"
+      ],
+      "scores": {
+        "claude-sonnet-4-6": 9.2,
+        "openai-gpt-4.1": 7.1,
+        "mistral-large2": 6.8,
+        "llama3.1-70b": 5.2
+      },
+      "rationale": {
+        "claude-sonnet-4-6": "Exceptional depth and clinical accuracy throughout. Provides the full Leipzig scoring system with exact thresholds and scoring weights \u2014 a critical diagnostic tool absent in all other models. Correctly distinguishes ceruloplasmin as an acute-phase reactant that can be falsely normal. Accurately notes that neurological WD can paradoxically worsen with chelation initiation (~20-50% with penicillamine), a critical safety point missed by all others. Correctly identifies tetrathiomolybdate as an emerging option for acute neurological WD. Specifies that neuropsychiatric WD alone is not a standard transplant indication. Includes pediatric dosing caveats, pregnancy management note, and family screening protocol. Uncertainty handling is exemplary \u2014 explicitly flags missing case data while still providing actionable population-level guidance. Structure is superior with tables, code blocks, and clear visual hierarchy. Minor gap: does not specify the Revised Wilson Index for transplant prognostication in ALF.",
+        "openai-gpt-4.1": "Clinically accurate and well-organized but lacks depth compared to claude-sonnet-4-6. Correctly lists key diagnostic criteria and management principles. Does not include the Leipzig scoring system, which is the validated diagnostic framework recommended by EASL/AASLD. Does not mention neurological worsening risk with penicillamine initiation \u2014 a significant safety omission. Zinc therapy correctly noted as alternative but not adequately contextualized (not sufficient as sole agent in symptomatic disease). Differential is reasonable but superficial. Uncertainty handling is adequate with a brief note on missing case data. References are appropriate and correctly cited.",
+        "mistral-large2": "Structurally clean and covers the major domains. Correctly identifies key diagnostic tests and management agents. However, contains a notable clinical inaccuracy: lists hemochromatosis as a differential without noting that hemochromatosis causes iron overload, not copper \u2014 while it is a valid differential for liver disease, the framing lacks precision. Does not include Leipzig scoring. Does not address the neurological worsening risk with chelation. Dietary advice (avoid shellfish, nuts, chocolate) is clinically appropriate but presented without context of its secondary role. Safety red flags section is reasonable. Acknowledges missing case data appropriately. Overall competent but lacks the clinical granularity needed for rare disease decision support.",
+        "llama3.1-70b": "Contains a significant clinical inaccuracy that reduces its safety score: states 'Normal ceruloplasmin levels can be seen in some cases of Wilson disease, particularly in the early stages' as an argument AGAINST the diagnosis \u2014 this is misleading framing. Normal ceruloplasmin does not argue against WD; it is a known limitation of the test (ceruloplasmin is an acute-phase reactant and can be falsely normal in up to 15-36% of hepatic WD). The model also fabricates specific case findings ('elevated liver enzymes,' 'presence of Kayser-Fleischer rings,' 'neurological symptoms') that were not provided in the case \u2014 this is a hallucination risk in clinical AI and a serious concern. Does not include Leipzig scoring. Management section is generic. References are appropriate. The hallucination of case-specific findings is the most serious flaw and significantly reduces trustworthiness."
+      }
+    }
+  },
+  "answers": {
+    "claude-sonnet-4-6": "10303 chars",
+    "openai-gpt-4.1": "2853 chars",
+    "llama3.1-70b": "2864 chars",
+    "mistral-large2": "2803 chars"
+  }
+}

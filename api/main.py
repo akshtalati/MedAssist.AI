@@ -1109,8 +1109,9 @@ def fetch_pubmed_context(question: str, limit: int = 20) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-# Snowflake Cortex model for /ask-both
-CORTEX_MODEL = "claude-sonnet-4-6"
+# Snowflake Cortex model for COMPLETE (override via CORTEX_MODEL env; see SHOW MODELS IN SNOWFLAKE.CORTEX)
+_CORTEX_DEFAULT = "claude-sonnet-4-6"
+CORTEX_MODEL = (os.environ.get("CORTEX_MODEL") or _CORTEX_DEFAULT).strip() or _CORTEX_DEFAULT
 
 
 def cortex_complete(prompt: str) -> str:
@@ -1507,7 +1508,8 @@ def ask_both(question: Question, user: CurrentUser):
     Return two answers for the same question: one from Gemini (Vertex AI) and one from
     Snowflake Cortex (claude-sonnet-4-6), both using the same hybrid context (RAG + ILIKE).
     """
-    literature = fetch_all_literature_context_hybrid(question.question, limit=30)
+    evidence_entries, fallback_mode = retrieve_evidence_journal_first(question.question, limit=30)
+    literature = _format_literature_context(evidence_entries)
     symptom_block = fetch_symptom_disease_context(question.question, limit=50)
     context = literature + ("\n\n" + symptom_block if symptom_block else "")
 
@@ -1526,6 +1528,10 @@ def ask_both(question: Question, user: CurrentUser):
     return {
         "answer_gemini": answer_gemini,
         "answer_cortex": answer_cortex,
+        "fallback_mode": fallback_mode,
+        "evidence_summary": _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode),
+        "evidence_sources": _normalize_evidence_entries(evidence_entries[:6], mode=fallback_mode),
+        "evidence_quality": _evaluate_evidence_quality(evidence_entries),
     }
 
 

@@ -16,6 +16,7 @@ Uses batch inserts (executemany) where safe; single-row inserts for large text/J
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,25 @@ SKIP_LOADED_CHECK = [
     ("rag", ["VECTORS.RAG_CHUNKS"]),
 ]
 
+TABLE_MIN_ROWS = {
+    "RAW.FETCH_MANIFESTS": 1,
+    "NORMALIZED.SYMPTOM_DISEASE_MAP": 1000,
+    "RAW.PUBMED_ARTICLES": 1000,
+    "RAW.PMC_ARTICLES": 500,
+    "RAW.OPENFDA_LABELS": 100,
+    "RAW.OPENFDA_EVENTS": 100,
+    "RAW.OPENFDA_NDC": 100,
+    "RAW.RXNORM_DRUGS": 100,
+    "RAW.WHO_DOCUMENTS": 50,
+    "RAW.NCBI_BOOKSHELF": 100,
+    "RAW.OPENSTAX_BOOKS": 100,
+    "RAW.ORPHANET_DISEASES": 100,
+    "RAW.ORPHANET_PHENOTYPES": 100,
+    "RAW.ORPHANET_GENES": 100,
+    "RAW.ORPHANET_WEB_PAGES": 10,
+    "VECTORS.RAG_CHUNKS": 100,
+}
+
 
 def _table_row_count(cursor, table: str) -> int:
     """Return row count for a single table (e.g. RAW.PUBMED_ARTICLES). Returns 0 on error."""
@@ -56,12 +76,16 @@ def _table_row_count(cursor, table: str) -> int:
         return 0
 
 
-def _step_already_loaded(cursor, tables: list) -> tuple[bool, int]:
-    """If any of the tables has at least one row, return (True, total_rows). Else (False, 0)."""
+def _step_already_loaded(cursor, tables: list) -> tuple[bool, int, list[str]]:
+    """Return True only when all tables satisfy minimum row thresholds."""
     total = 0
+    incomplete = []
     for t in tables:
-        total += _table_row_count(cursor, t)
-    return (total > 0, total)
+        cnt = _table_row_count(cursor, t)
+        total += cnt
+        if cnt < TABLE_MIN_ROWS.get(t, 1):
+            incomplete.append(f"{t}={cnt}<{TABLE_MIN_ROWS.get(t, 1)}")
+    return (not incomplete, total, incomplete)
 
 
 def load_manifests(cursor) -> int:
@@ -854,7 +878,8 @@ def main():
     parser.add_argument("--orphanet-web", action="store_true", dest="orphanet_web", help="Load Orphanet web crawl (orpha.net pages)")
     parser.add_argument("--rag", action="store_true", help="Load RAG chunks from ChromaDB")
     parser.add_argument("--all", action="store_true", help="Load everything")
-    parser.add_argument("--skip-loaded", action="store_true", help="Skip any step whose table(s) already have rows")
+    parser.add_argument("--skip-loaded", action="store_true", help="Skip any step whose table(s) meet minimum row thresholds")
+    parser.add_argument("--strict", action="store_true", help="Fail if post-load table coverage is below minimum thresholds")
     args = parser.parse_args()
 
     load_all = args.all or not any([
@@ -870,15 +895,19 @@ def main():
             return False
         for key, tables in SKIP_LOADED_CHECK:
             if key == step_key:
-                loaded, total = _step_already_loaded(cursor, tables)
+                loaded, total, incomplete = _step_already_loaded(cursor, tables)
                 if loaded:
-                    print(f"  (Step already loaded: {total:,} rows in table(s), skipping)", flush=True)
+                    print(f"  (Step already loaded: {total:,} rows and thresholds met, skipping)", flush=True)
+                elif total > 0 and incomplete:
+                    print(f"  (Step partially loaded; re-running because {', '.join(incomplete)})", flush=True)
                 return loaded
         return False
 
     try:
-        cursor.execute("USE WAREHOUSE MEDASSIST_WH")
-        cursor.execute("USE DATABASE MEDASSIST_DB")
+        warehouse = os.environ.get("SNOWFLAKE_WAREHOUSE", "MEDASSIST_WH")
+        database = os.environ.get("SNOWFLAKE_DATABASE", "MEDASSIST_DB")
+        cursor.execute(f"USE WAREHOUSE {warehouse}")
+        cursor.execute(f"USE DATABASE {database}")
 
         total_start = time.time()
         if load_all:
@@ -968,6 +997,15 @@ def main():
                 t0 = time.time()
                 n = load_rag_chunks(cursor)
                 print(f"Loaded {n} RAG chunks ({time.time() - t0:.1f}s)", flush=True)
+
+        if args.strict:
+            failures = []
+            for table, minimum in TABLE_MIN_ROWS.items():
+                cnt = _table_row_count(cursor, table)
+                if cnt < minimum:
+                    failures.append(f"{table}={cnt}<{minimum}")
+            if failures:
+                raise RuntimeError("Strict coverage failed: " + ", ".join(failures))
 
         conn.commit()
         elapsed = time.time() - total_start

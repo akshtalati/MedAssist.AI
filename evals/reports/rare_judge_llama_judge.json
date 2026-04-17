@@ -1,0 +1,45 @@
+{
+  "mode": "rare-judge",
+  "disease": "Wilson disease",
+  "judge_model": "llama3.1-70b",
+  "models_requested": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2"
+  ],
+  "models_answered": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2"
+  ],
+  "models_failed": {},
+  "winner": "claude-sonnet-4-6",
+  "ranking": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2"
+  ],
+  "judge": {
+    "judge_model": "llama3.1-70b",
+    "raw": "{\n  \"winner\": \"claude-sonnet-4-6\",\n  \"ranking\": [\"claude-sonnet-4-6\", \"openai-gpt-4.1\", \"mistral-large2\"],\n  \"scores\": {\n    \"claude-sonnet-4-6\": 9.5,\n    \"openai-gpt-4.1\": 8.5,\n    \"mistral-large2\": 8\n  },\n  \"rationale\": \"claude-sonnet-4-6 provided the most comprehensive and accurate response, addressing all aspects of the case, including diagnosis, differential considerations, recommended diagnostics, initial management, and safety red flags. Its structure and organization were also superior, making it easier to follow and understand. openai-gpt-4.1 and mistral-large2 provided good responses, but lacked some details and clarity in their answers.\"\n}",
+    "parsed": {
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2"
+      ],
+      "scores": {
+        "claude-sonnet-4-6": 9.5,
+        "openai-gpt-4.1": 8.5,
+        "mistral-large2": 8
+      },
+      "rationale": "claude-sonnet-4-6 provided the most comprehensive and accurate response, addressing all aspects of the case, including diagnosis, differential considerations, recommended diagnostics, initial management, and safety red flags. Its structure and organization were also superior, making it easier to follow and understand. openai-gpt-4.1 and mistral-large2 provided good responses, but lacked some details and clarity in their answers."
+    }
+  },
+  "answers": {
+    "claude-sonnet-4-6": "9664 chars",
+    "openai-gpt-4.1": "2605 chars",
+    "mistral-large2": "2859 chars"
+  }
+}
