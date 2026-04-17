@@ -1,0 +1,312 @@
+{
+  "mode": "rare-batch-judge",
+  "judge_model": "llama3.1-70b",
+  "models_requested": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2",
+    "llama3.1-70b"
+  ],
+  "n_cases": 5,
+  "overall_winner": "claude-sonnet-4-6",
+  "overall_ranking": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2",
+    "llama3.1-70b"
+  ],
+  "overall_points": {
+    "claude-sonnet-4-6": 16,
+    "openai-gpt-4.1": 12,
+    "mistral-large2": 8,
+    "llama3.1-70b": 4
+  },
+  "overall_winner_reason": "No rationale available",
+  "cases": [
+    {
+      "disease": "Wilson disease",
+      "case": "17-year-old with tremor, jaundice, elevated AST/ALT, low ceruloplasmin, and behavioral changes.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Discovery of newborn Wilson disease biomarkers via integrated next-generation sequencing and untargeted metabolomics.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41454338/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Wilson Disease Hiding in Plain Sight: A Case Report of Psychosis and Catatonia Revealing Underlying Liver Dysfunction.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41441537/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Gait deviations in adolescent patients with Wilson disease and their possible connections with biochemical markers: preliminary results.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41673343/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+        }
+      ],
+      "models_answered": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "judge": {
+        "judge_model": "llama3.1-70b",
+        "raw": "**Winner:** claude-sonnet-4-6\n\n**Ranking:**\n\n1. claude-sonnet-4-6\n2. openai-gpt-4.1\n3. mistral-large2\n4. llama3.1-70b\n\n**Scores:**\n\n* claude-sonnet-4-6: 9.5/10\n* openai-gpt-4.1: 8.5/10\n* mistral-large2: 7.5/10\n* llama3.1-70b: 6.5/10\n\n**Rationale:**\n\nclaude-sonnet-4-6 is the winner due to its comprehensive and well-structured answer, which provides a clear summary, key findings, differential considerations, recommended diagnostics, and initial management plan. The model also provides relevant references to support its claims.\n\nopenai-gpt-4.1 is a close second, providing a detailed answer with a clear summary, key findings, and differential considerations. However, its answer is slightly less comprehensive than claude-sonnet-4-6, and it lacks specific references to support its claims.\n\nmistral-large2 provides a good summary and key findings, but its answer is less comprehensive than the top two models, and it lacks specific references.\n\nllama3.1-70b provides a brief summary and some key findings, but its answer is the least comprehensive of the four models, and it lacks specific references.\n\nOverall, the top two models (claude-sonnet-4-6 and openai-gpt-4.1) demonstrate a strong understanding of Wilson disease and provide well-structured answers with relevant references.",
+        "parsed": {
+          "winner": "claude-sonnet-4-6",
+          "ranking": [
+            "claude-sonnet-4-6",
+            "openai-gpt-4.1",
+            "mistral-large2",
+            "llama3.1-70b"
+          ],
+          "scores": {
+            "claude-sonnet-4-6": 9.5,
+            "openai-gpt-4.1": 8.5,
+            "mistral-large2": 7.5,
+            "llama3.1-70b": 6.5
+          }
+        }
+      },
+      "answers": {
+        "claude-sonnet-4-6": "10379 chars",
+        "openai-gpt-4.1": "3870 chars",
+        "mistral-large2": "3234 chars",
+        "llama3.1-70b": "2526 chars"
+      }
+    },
+    {
+      "disease": "Acute intermittent porphyria",
+      "case": "24-year-old with recurrent severe abdominal pain, neuropathy, anxiety, dark urine, and hyponatremia.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Claw hands in acute intermittent porphyria.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+        }
+      ],
+      "models_answered": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "models_failed": {},
+      "winner": null,
+      "ranking": null,
+      "judge": {
+        "judge_model": "llama3.1-70b",
+        "raw": "Here is the evaluation of the models in JSON format:\n\n```\n{\n  \"winner\": \"claude-sonnet-4-6\",\n  \"ranking\": [\"claude-sonnet-4-6\", \"openai-gpt-4.1\", \"mistral-large2\", \"llama3.1-70b\"],\n  \"scores\": {\n    \"claude-sonnet-4-6\": 9.5,\n    \"openai-gpt-4.1\": 8.5,\n    \"mistral-large2\": 7.5,\n    \"llama3.1-70b\": 6.5\n  },\n  \"rationale\": \"claude-sonnet-4-6 provided the most comprehensive and accurate response, covering all aspects of the case, including diagnosis, differential diagnosis, diagnostic tests, and management. openai-gpt-4.1 and mistral-large2 also provided good responses, but with some gaps in their answers. llama3.1-70b's response was less comprehensive and contained some inaccuracies.\"\n}\n```\n\nNote that the scores are subjective and based on my evaluation of the responses. The winner is chosen based on the overall quality and comprehensiveness of the response.",
+        "parsed": null
+      },
+      "answers": {
+        "claude-sonnet-4-6": "10529 chars",
+        "openai-gpt-4.1": "3372 chars",
+        "mistral-large2": "2944 chars",
+        "llama3.1-70b": "3494 chars"
+      }
+    },
+    {
+      "disease": "Gaucher disease type 1",
+      "case": "30-year-old with splenomegaly, thrombocytopenia, bone pain, and elevated ferritin.",
+      "papers": [],
+      "models_answered": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "judge": {
+        "judge_model": "llama3.1-70b",
+        "raw": "Here is the ranking of the models from best to worst based on the provided answers:\n\n**Winner:** claude-sonnet-4-6\n\n**Ranking:**\n\n1. claude-sonnet-4-6\n2. openai-gpt-4.1\n3. mistral-large2\n4. llama3.1-70b\n\n**Scores:**\n\n* claude-sonnet-4-6: 9.5/10\n* openai-gpt-4.1: 8.5/10\n* mistral-large2: 7.5/10\n* llama3.1-70b: 6.5/10\n\n**Rationale:**\n\n* claude-sonnet-4-6 provided a comprehensive and well-structured answer that covered all aspects of the case, including clinical presentation, differential diagnosis, diagnostic workup, and management. The answer was detailed and accurate, with proper use of medical terminology and formatting.\n* openai-gpt-4.1 provided a good answer that covered the key points of the case, but was less detailed and structured than claude-sonnet-4-6. The answer was still accurate and well-written, but lacked some of the nuance and depth of the top-ranked answer.\n* mistral-large2 provided a fair answer that covered the main points of the case, but was less detailed and accurate than the top two answers. The answer was somewhat disorganized and lacked proper use of medical terminology.\n* llama3.1-70b provided a poor answer that lacked detail and accuracy. The answer was disorganized and failed to cover key aspects of the case, including differential diagnosis and management.\n\nOverall, claude-sonnet-4-6 provided the best answer due to its comprehensive and well-structured approach to the case, while llama3.1-70b provided the worst answer due to its lack of detail and accuracy.",
+        "parsed": {
+          "winner": "claude-sonnet-4-6",
+          "ranking": [
+            "claude-sonnet-4-6",
+            "openai-gpt-4.1",
+            "mistral-large2",
+            "llama3.1-70b"
+          ],
+          "scores": {
+            "claude-sonnet-4-6": 9.5,
+            "openai-gpt-4.1": 8.5,
+            "mistral-large2": 7.5,
+            "llama3.1-70b": 6.5
+          }
+        }
+      },
+      "answers": {
+        "claude-sonnet-4-6": "10568 chars",
+        "openai-gpt-4.1": "2458 chars",
+        "mistral-large2": "2607 chars",
+        "llama3.1-70b": "2685 chars"
+      }
+    },
+    {
+      "disease": "Fabry disease",
+      "case": "28-year-old with burning extremity pain, angiokeratomas, proteinuria, and family history of early stroke.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Digital Health for Rare Diseases: A Scoping Review of Artificial Intelligence, Connected Care, and Enabling Digital Technologies for Lysosomal Storage Disorders.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41661224/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Distinctive imaging of rare anterior subcapsular lens deposits in Fabry disease.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41577844/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Elevated circulating cell-free mitochondrial DNA in fabry disease: insights into inflammatory activation.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41573578/"
+        }
+      ],
+      "models_answered": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "judge": {
+        "judge_model": "llama3.1-70b",
+        "raw": "**Ranking:**\n\n1. claude-sonnet-4-6\n2. openai-gpt-4.1\n3. mistral-large2\n4. llama3.1-70b\n\n**Scores:**\n\n- claude-sonnet-4-6: 9.5/10\n- openai-gpt-4.1: 8.5/10\n- mistral-large2: 7.5/10\n- llama3.1-70b: 6.5/10\n\n**Rationale:**\n\nclaude-sonnet-4-6 is the winner due to its comprehensive and detailed response, which includes a thorough summary, key findings, differential considerations, recommended diagnostics, initial management, and safety red flags. The model also provides relevant references to support its answers.\n\nopenai-gpt-4.1 ranks second, providing a clear and concise response that covers the essential points. However, it lacks the depth and detail of claude-sonnet-4-6.\n\nmistral-large2 ranks third, offering a good summary and key findings but lacking in detail and depth in its differential considerations and management plan.\n\nllama3.1-70b ranks last, providing a brief summary and some relevant points but lacking in detail and depth throughout its response.\n\n**Winner:** claude-sonnet-4-6",
+        "parsed": {
+          "winner": "claude-sonnet-4-6",
+          "ranking": [
+            "claude-sonnet-4-6",
+            "openai-gpt-4.1",
+            "mistral-large2",
+            "llama3.1-70b"
+          ],
+          "scores": {
+            "claude-sonnet-4-6": 9.5,
+            "openai-gpt-4.1": 8.5,
+            "mistral-large2": 7.5,
+            "llama3.1-70b": 6.5
+          }
+        }
+      },
+      "answers": {
+        "claude-sonnet-4-6": "11609 chars",
+        "openai-gpt-4.1": "3544 chars",
+        "mistral-large2": "3254 chars",
+        "llama3.1-70b": "2777 chars"
+      }
+    },
+    {
+      "disease": "Hereditary angioedema",
+      "case": "19-year-old with recurrent non-urticarial swelling episodes, abdominal attacks, and low C4.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Ecological momentary assessments for patients with hereditary angioedema: a feasibility and acceptability controlled study.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41602209/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Attack rate reductions following berotralstat initiation among US patients with hereditary angioedema in the real-world.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41582175/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Functional physiological, psychological, and biochemical reactivity to socially evaluated cold pressor test in hereditary angioedema patients (FRoSEn).",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41573571/"
+        },
+        {
+          "source": "pubmed",
+          "title": "Burden of hereditary angioedema: results from a multinational survey of caregivers for adult and pediatric patients.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41680909/"
+        }
+      ],
+      "models_answered": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "judge": {
+        "judge_model": "llama3.1-70b",
+        "raw": "**Winner:** claude-sonnet-4-6\n\n**Ranking:**\n\n1. claude-sonnet-4-6\n2. openai-gpt-4.1\n3. mistral-large2\n4. llama3.1-70b\n\n**Scores:**\n\n* claude-sonnet-4-6: 9.5/10\n* openai-gpt-4.1: 8.5/10\n* mistral-large2: 7.5/10\n* llama3.1-70b: 6.5/10\n\n**Rationale:**\n\nclaude-sonnet-4-6 is the winner due to its comprehensive and well-structured answer, which accurately addresses the clinical scenario and provides relevant information on hereditary angioedema (HAE). The model's response includes a clear summary, key findings, differential considerations, recommended diagnostics, and initial management strategies, all of which are well-supported by the provided references.\n\nopenai-gpt-4.1 ranks second, as its response is also well-structured and provides relevant information on HAE. However, it lacks some of the detail and clarity of claude-sonnet-4-6's response.\n\nmistral-large2 ranks third, as its response is somewhat less detailed and less well-structured than the top two models. However, it still provides some useful information on HAE and its management.\n\nllama3.1-70b ranks last, as its response is the least detailed and least well-structured of the four models. While it provides some basic information on HAE, it lacks the depth and clarity of the other models' responses.",
+        "parsed": {
+          "winner": "claude-sonnet-4-6",
+          "ranking": [
+            "claude-sonnet-4-6",
+            "openai-gpt-4.1",
+            "mistral-large2",
+            "llama3.1-70b"
+          ],
+          "scores": {
+            "claude-sonnet-4-6": 9.5,
+            "openai-gpt-4.1": 8.5,
+            "mistral-large2": 7.5,
+            "llama3.1-70b": 6.5
+          }
+        }
+      },
+      "answers": {
+        "claude-sonnet-4-6": "10117 chars",
+        "openai-gpt-4.1": "4140 chars",
+        "mistral-large2": "2965 chars",
+        "llama3.1-70b": "2582 chars"
+      }
+    }
+  ]
+}

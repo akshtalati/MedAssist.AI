@@ -1,0 +1,1481 @@
+{
+  "mode": "rare-gold-batch",
+  "judge_model": "llama3.1-70b",
+  "gold_model": "claude-sonnet-4-6",
+  "models_requested": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1",
+    "mistral-large2",
+    "llama3.1-70b"
+  ],
+  "n_cases": 5,
+  "overall_winner": "claude-sonnet-4-6",
+  "overall_ranking": [
+    "claude-sonnet-4-6",
+    "mistral-large2",
+    "llama3.1-70b",
+    "openai-gpt-4.1"
+  ],
+  "overall_points": {
+    "claude-sonnet-4-6": 15,
+    "mistral-large2": 12,
+    "llama3.1-70b": 12,
+    "openai-gpt-4.1": 11
+  },
+  "overall_mean_final_score": {
+    "claude-sonnet-4-6": 0.73,
+    "openai-gpt-4.1": 0.505,
+    "mistral-large2": 0.65,
+    "llama3.1-70b": 0.519
+  },
+  "overall_winner_reason": "claude-sonnet-4-6 has highest aggregate points (15) and mean final_score 0.73.",
+  "cases": [
+    {
+      "disease": "Wilson disease",
+      "case": "17-year-old with tremor, jaundice, elevated AST/ALT, low ceruloplasmin, and behavioral changes.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/",
+          "snippet": "Wilson disease is a rare autosomal recessive disorder caused by variations in ATP7B, leading to copper accumulation and multisystemic damage. Diagnosis is often delayed due to its heterogeneous clinical presentation and limited genetic data in underrepresented populations. Wilson disease is a rare autosomal recessive disorder caused by variations in ATP7B, leading to copper accumulation and multisystemic damage. Diagnosis is often delayed due to its heterogeneous clinical presentation and limited genetic data in underrepresented populations. We characterized ten Ecuadorian patients with clinical suspicion of Wilson disease using whole-exome sequencing (WES), selected to enable simultaneous assessment of ATP7B and other metabolic genes relevant to Wilson-like phenotypes. Variants were interpreted following HGNC and ACMG/AMP guidelines. Ancestry was examined in nine patients using ADMIXTURE and PCA with a reference panel of 968 individuals from African, European, and Indigenous American populations. ATP7B expression was quantified by RT-qPCR in the one patient lacking identifiable coding-region variants. We characterized ten Ecuadorian patients with clinical suspicion of Wilson disea"
+        },
+        {
+          "source": "pubmed",
+          "title": "Gait deviations in adolescent patients with Wilson disease and their possible connections with biochemical markers: preliminary results.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41673343/",
+          "snippet": "The study aims to evaluate the gait pattern of Wilson Disease adolescents, receiving pharmacological treatment, without clinical signs of gait problems, with instrumented gait analysis. The gait changes could be the first signs of neurological manifestations, providing information about which patients are at greater risk of developing neurological problems. Another aim of the paper was to find possible relationships between gait disturbances and biochemical markers. Twenty-seven patients underwent gait analysis with the VICON system. Captured data were processed and averaged. From them, the Gait Variable Scores and Gait Profile Score were calculated to assess the deviation from normal gait. The following biochemical parameters were included in the analysis: ALT, AST, GGTP, bilirubin, INR, and an abdominal ultrasound describing liver and spleen size. Additionally, a fibroscan measurement was performed to obtain information about liver stiffness (E value) and steatosis (CAP value). The neurological assessment was based on a review of school performance, tremor, walking, and writing problems. In all patients, the scores assessing global gait pattern and knee kinematics were increased,"
+        },
+        {
+          "source": "pubmed",
+          "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/",
+          "snippet": "Background Wilson disease (WD) is a rare autosomal recessive disorder of copper metabolism and an important treatable cause of hepatic dysfunction in young adults. Data from South Asian populations remains limited. Hence, the current study aimed to assess the demographic characteristics, clinical features, and diagnostic profile of patients with WD presenting at a tertiary care hospital in Peshawar, Pakistan. Methods This retrospective descriptive study was conducted in the Department of Medicine, Hayatabad Medical Complex, Peshawar, between January 2023 and December 2024. Medical records were systematically reviewed to identify all patients diagnosed with WD during this period. 21 patients with a confirmed WD diagnosis based on the modified Leipzig scoring system (score \u2265 4) and complete diagnostic workup were included. Complete diagnostic data was defined as documented serum ceruloplasmin, 24-hour urinary copper excretion, liver function tests, slit-lamp examination for Kayser-Fleischer (KF) rings, and negative screening for viral and autoimmune hepatitis. Demographic, clinical, and biochemical data were extracted from hospital records and analyzed using SPSS version 25. Post-hoc"
+        },
+        {
+          "source": "pubmed",
+          "title": "Neurologic Manifestations of Hepatic and Gastrointestinal Disease.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41631918/",
+          "snippet": "This article discusses the pathophysiology, diagnosis, and management of neurologic complications of hepatic and gastrointestinal diseases. This article discusses the pathophysiology, diagnosis, and management of neurologic complications of hepatic and gastrointestinal diseases. Hepatic and gastrointestinal diseases such as hepatitis C, Wilson disease, inflammatory bowel disease, and celiac disease can initially present with neurologic symptoms, and neurologic syndromes may be the only manifestations of these conditions. Renal replacement therapy to decrease ammonia levels reduces mortality in patients with acute hepatic encephalopathy. Patients with chronic liver disease should be screened for covert cognitive changes to facilitate earlier initiation of ammonia-lowering therapies to decrease episodes of overt hepatic encephalopathy. Hepatic and gastrointestinal diseases such as hepatitis C, Wilson disease, inflammatory bowel disease, and celiac disease can initially present with neurologic symptoms, and neurologic syndromes may be the only manifestations of these conditions. Renal replacement therapy to decrease ammonia levels reduces mortality in patients with acute hepatic encep"
+        },
+        {
+          "source": "pubmed",
+          "title": "Global burden of Wilson disease: a comprehensive evidence synthesis.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41530865/",
+          "snippet": ""
+        }
+      ],
+      "disease_gold_list": [
+        {
+          "fact": "Diagnosis of Wilson disease is often delayed due to heterogeneous clinical presentation",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/"
+            }
+          ]
+        },
+        {
+          "fact": "Wilson-like phenotypes may be caused by variants in metabolic genes other than ATP7B, requiring broad genetic differential evaluation",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/"
+            }
+          ]
+        },
+        {
+          "fact": "Limited genetic data in underrepresented populations (e.g., Ecuadorian/Latin American with mixed Indigenous American, European, and African ancestry) may complicate variant interpretation in Wilson disease",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/"
+            }
+          ]
+        },
+        {
+          "fact": "Delayed diagnosis of Wilson disease risks progressive and potentially irreversible multisystemic copper-related damage",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Genetic findings in ten Ecuadorian patients with suspected Wilson's disease.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41680931/"
+            }
+          ]
+        },
+        {
+          "fact": "Neurological assessment in Wilson disease should include review of school performance, tremor, walking problems, and writing problems",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Gait deviations in adolescent patients with Wilson disease and their possible connections with biochemical markers: preliminary results.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41673343/"
+            }
+          ]
+        },
+        {
+          "fact": "Subclinical neurological involvement (gait deviations) can be present in Wilson disease patients despite absence of clinical neurological signs, warranting careful monitoring",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Gait deviations in adolescent patients with Wilson disease and their possible connections with biochemical markers: preliminary results.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41673343/"
+            }
+          ]
+        },
+        {
+          "fact": "Neurological manifestations of Wilson disease include tremor, gait problems, and writing difficulties",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Gait deviations in adolescent patients with Wilson disease and their possible connections with biochemical markers: preliminary results.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41673343/"
+            }
+          ]
+        },
+        {
+          "fact": "Diagnosis confirmed using the modified Leipzig scoring system with a score \u2265 4",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Complete diagnostic workup requires serum ceruloplasmin measurement",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Complete diagnostic workup requires 24-hour urinary copper excretion measurement",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Slit-lamp examination for Kayser-Fleischer (KF) rings is a required diagnostic component",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Negative screening for viral and autoimmune hepatitis is required to confirm Wilson disease diagnosis",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Viral hepatitis is a key differential diagnosis to exclude in Wilson disease workup",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Wilson disease is a treatable condition, making accurate and timely diagnosis safety-critical",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Clinical and Demographic Profile of Wilson Disease in Young Adults: A Retrospective Study at a Tertiary Care Center in Peshawar, Pakistan.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41635375/"
+            }
+          ]
+        },
+        {
+          "fact": "Wilson disease can initially present with neurologic symptoms, and neurologic syndromes may be the only manifestations of the condition",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Neurologic Manifestations of Hepatic and Gastrointestinal Disease.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41631918/"
+            }
+          ]
+        }
+      ],
+      "model_scores": {
+        "claude-sonnet-4-6": {
+          "gold_coverage_score": 0.8,
+          "safety_score": 0.2,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.623,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              10,
+              11,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              5,
+              13
+            ],
+            "explanation": "The provided answer covers all the gold facts, including those related to diagnosis, differential diagnosis, safety, and treatment of Wilson disease. It also addresses the importance of early diagnosis, the role of genetic testing, and the need for a multidisciplinary approach. The answer does not contradict any of the gold facts and covers all theritical facts.",
+            "judge_raw": "{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 5, 13],\n  \"explanation\": \"The provided answer covers all the gold facts, including those related to diagnosis, differential diagnosis, safety, and treatment of Wilson disease. It also addresses the importance of early diagnosis, the role of genetic testing, and the need for a multidisciplinary approach. The answer does not contradict any of the gold facts and covers all theritical facts.\"\n}"
+          }
+        },
+        "openai-gpt-4.1": {
+          "gold_coverage_score": 0.0,
+          "safety_score": 0.0,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.1,
+          "judge_result": {
+            "covered_fact_ids": [],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [],
+            "explanation": "",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_i3, 6, 8, 9, 10, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 5, 13],\n  \"explanation\": \"The answer covers several key facts about Wilson disease, including its diagnosis, symptoms, and safety considerations. It mentions the importance of diagnostic confirmation, initiation of therapy, and monitoring for safety red flags. The answer also discusses the need for a comprehensive diagnostic workup, including serum ceruloplasmin measurement, 24-hour urinary copper excretion, and slit-lamp examination for Kayser-Fleischer rings. However, it does not explicitly mention the modified Leipzig scoring system or the importance of negative screening for viral and autoimmune hepatitis. The answer does not contradict any of the gold facts.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes the IDs of the gold facts that are explicitly mentioned or implied in the answer. The \"contradicted_fact_ids\" list is empty because the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the IDs of the gold facts that are related to safety considerations and are covered in the answer."
+          }
+        },
+        "mistral-large2": {
+          "gold_coverage_score": 0.6,
+          "safety_score": 0.2,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.48,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              3,
+              6,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              5,
+              13
+            ],
+            "explanation": "The answer covers several key facts about Wilson disease, including its diagnosis, symptoms, and management. It also highlights the importance of timely diagnosis and treatment to prevent irreversible damage. The answer does not contradict any of the gold facts and covers several safety-critical facts, such as the risk of progressive multisystemic copper-related damage and the importance of monitoring for acute liver failure and neurological deterioration.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 3, 6, 8, 9, 10, 11, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 5, 13],\n  \"explanation\": \"The answer covers several key facts about Wilson disease, including its diagnosis, symptoms, and management. It also highlights the importance of timely diagnosis and treatment to prevent irreversible damage. The answer does not contradict any of the gold facts and covers several safety-critical facts, such as the risk of progressive multisystemic copper-related damage and the importance of monitoring for acute liver failure and neurological deterioration.\"\n}\n```\n\nNote that the `covered_fact_ids` list includes the IDs of the gold facts that are supported or mentioned in the answer, while the `contradicted_fact_ids` list is empty since the answer does not contradict any of the gold facts. The `safety_covered_ids` list includes the IDs of the safety-critical facts that are covered in the answer."
+          }
+        },
+        "llama3.1-70b": {
+          "gold_coverage_score": 0.333,
+          "safety_score": 0.2,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.367,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              3,
+              6,
+              8,
+              13
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              5,
+              13
+            ],
+            "explanation": "The answer covers several key facts about Wilson disease, including its diagnosis, clinical presentation, and safety considerations. It mentions the importance of low ceruloplasmin levels, liver damage, and neurological involvement, which are all consistent with the gold facts. The answer also highlights the need for a comprehensive diagnostic workup, including genetic testing, liver biopsy, and imaging studies. However, it does not mention some important safety-critical facts, such as the risk of progressive and potentially irreversible multisystemic copper-related damage if diagnosis is delayed (Fact 3). The answer also does not explicitly mention the modified Leipzig scoring system, serum ceruloplasmin measurement, 24-hour urinary copper excretion measurement, or slit-lamp examination for Kayser-Fleischer rings, which are all important diagnostic components (Facts 7, 8, 9, and 10).",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 3, 6, 8, 13],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 5, 13],\n  \"explanation\": \"The answer covers several key facts about Wilson disease, including its diagnosis, clinical presentation, and safety considerations. It mentions the importance of low ceruloplasmin levels, liver damage, and neurological involvement, which are all consistent with the gold facts. The answer also highlights the need for a comprehensive diagnostic workup, including genetic testing, liver biopsy, and imaging studies. However, it does not mention some important safety-critical facts, such as the risk of progressive and potentially irreversible multisystemic copper-related damage if diagnosis is delayed (Fact 3). The answer also does not explicitly mention the modified Leipzig scoring system, serum ceruloplasmin measurement, 24-hour urinary copper excretion measurement, or slit-lamp examination for Kayser-Fleischer rings, which are all important diagnostic components (Facts 7, 8, 9, and 10).\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes the IDs of the gold facts that are explicitly mentioned or implied in the answer. The \"contradicted_fact_ids\" list is empty because the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the IDs of the safety-critical facts that are mentioned in the answer. The \"explanation\" field provides a brief summary of the evaluation."
+          }
+        }
+      },
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "mistral-large2",
+        "llama3.1-70b",
+        "openai-gpt-4.1"
+      ],
+      "disease_winner_reason": "claude-sonnet-4-6 won with higher final_score (0.623) than mistral-large2 (0.48); coverage=0.8 safety=0.2 contradiction_penalty=0.0.",
+      "answers": {
+        "claude-sonnet-4-6": "10150 chars",
+        "openai-gpt-4.1": "3748 chars",
+        "mistral-large2": "3319 chars",
+        "llama3.1-70b": "3057 chars"
+      }
+    },
+    {
+      "disease": "Acute intermittent porphyria",
+      "case": "24-year-old with recurrent severe abdominal pain, neuropathy, anxiety, dark urine, and hyponatremia.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Claw hands in acute intermittent porphyria.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/",
+          "snippet": ""
+        }
+      ],
+      "disease_gold_list": [
+        {
+          "fact": "AIP should be considered in the differential diagnosis of unexplained peripheral neuropathy with motor involvement",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "Avoidance of porphyrinogenic triggers (certain drugs, fasting, alcohol) is essential in AIP management",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "Hemin (heme arginate) infusion is a key treatment for acute AIP attacks",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "Many commonly used drugs are contraindicated in AIP due to risk of precipitating acute attacks",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "Acute intermittent porphyria (AIP) can present with claw hand deformity as a neurological manifestation",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "AIP is associated with peripheral neuropathy that can lead to motor deficits and hand deformities",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        },
+        {
+          "fact": "Urine porphobilinogen (PBG) and aminolevulinic acid (ALA) levels should be measured to confirm AIP diagnosis",
+          "category": "diagnostics",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "Claw hands in acute intermittent porphyria.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41458287/"
+            }
+          ]
+        }
+      ],
+      "model_scores": {
+        "claude-sonnet-4-6": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.75,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.838,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              1,
+              2,
+              3
+            ],
+            "explanation": "The provided answer covers all the gold facts, including the importance of considering AIP in the differential diagnosis of unexplained peripheral neuropathy with motor involvement, the need to avoid porphyrinogenic triggers, and the use of hemin infusion as a key treatment for acute AIP attacks. The answer also highlights the importance of monitoring for safety-critical complications such as respiratory muscle weakness, bulbar dysfunction, and severe hyponatremia. The explanation is comprehensive and accurate, and the answer does not contradict any of the gold facts.",
+            "judge_raw": "Here is the JSON output with the requested keys:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [1, 2, 3],\n  \"explanation\": \"The provided answer covers all the gold facts, including the importance of considering AIP in the differential diagnosis of unexplained peripheral neuropathy with motor involvement, the need to avoid porphyrinogenic triggers, and the use of hemin infusion as a key treatment for acute AIP attacks. The answer also highlights the importance of monitoring for safety-critical complications such as respiratory muscle weakness, bulbar dysfunction, and severe hyponatremia. The explanation is comprehensive and accurate, and the answer does not contradict any of the gold facts.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes all the gold fact IDs, as the answer covers all the facts. The \"contradicted_fact_ids\" list is empty, as the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the IDs of the safety-critical facts that are covered in the answer."
+          }
+        },
+        "openai-gpt-4.1": {
+          "gold_coverage_score": 0.475,
+          "safety_score": 0.5,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.486,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              4,
+              5,
+              6
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              1,
+              3
+            ],
+            "explanation": "The answer covers several key facts about acute intermittent porphyria (AIP), including its presentation with neuropathy and motor involvement, the importance of considering it in the differential diagnosis, and the need for specific diagnostic tests such as urine porphobilinogen (PBG) and aminolevulinic acid (ALA) levels. The answer also highlights the safety-critical aspects of AIP management, including the avoidance of porphyrinogenic triggers and the use of hemin infusion as a key treatment. However, the answer does not explicitly mention the fact that many commonly used drugs are contraindicated in AIP due to the risk of precipitating acute attacks, which is a critical safety consideration.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 4, 5, 6],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [1, 3],\n  \"explanation\": \"The answer covers several key facts about acute intermittent porphyria (AIP), including its presentation with neuropathy and motor involvement, the importance of considering it in the differential diagnosis, and the need for specific diagnostic tests such as urine porphobilinogen (PBG) and aminolevulinic acid (ALA) levels. The answer also highlights the safety-critical aspects of AIP management, including the avoidance of porphyrinogenic triggers and the use of hemin infusion as a key treatment. However, the answer does not explicitly mention the fact that many commonly used drugs are contraindicated in AIP due to the risk of precipitating acute attacks, which is a critical safety consideration.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes facts 0, 4, 5, and 6, which are all relevant to the diagnosis and presentation of AIP. The \"safety_covered_ids\" list includes facts 1 and 3, which are related to the safety-critical aspects of AIP management. There are no contradicted fact IDs, as the answer does not contradict any of the gold facts."
+          }
+        },
+        "mistral-large2": {
+          "gold_coverage_score": 0.65,
+          "safety_score": 0.5,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.583,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              3,
+              4,
+              5,
+              6
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              1,
+              3
+            ],
+            "explanation": "The answer covers several key facts about Acute Intermittent Porphyria (AIP), including its symptoms, diagnosis, and management. It mentions the importance of considering AIP in the differential diagnosis of unexplained peripheral neuropathy with motor involvement (Fact 0), the need to avoid precipitating factors such as certain medications and fasting (Fact 1), and the risk of respiratory failure and seizures as safety red flags (related to Fact 3). The answer also mentions the diagnostic value of urine porphobilinogen (PBG) and aminolevulinic acid (ALA) levels (Fact 6), and the association of AIP with peripheral neuropathy and hand deformities (Facts 4 and 5). However, it does not mention hemin infusion as a key treatment for acute AIP attacks (Fact 2).",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 3, 4, 5, 6],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [1, 3],\n  \"explanation\": \"The answer covers several key facts about Acute Intermittent Porphyria (AIP), including its symptoms, diagnosis, and management. It mentions the importance of considering AIP in the differential diagnosis of unexplained peripheral neuropathy with motor involvement (Fact 0), the need to avoid precipitating factors such as certain medications and fasting (Fact 1), and the risk of respiratory failure and seizures as safety red flags (related to Fact 3). The answer also mentions the diagnostic value of urine porphobilinogen (PBG) and aminolevulinic acid (ALA) levels (Fact 6), and the association of AIP with peripheral neuropathy and hand deformities (Facts 4 and 5). However, it does not mention hemin infusion as a key treatment for acute AIP attacks (Fact 2).\"\n}\n```\n\nNote that the \"safety_covered_ids\" field only includes facts that are directly related to safety-critical information, which in this case are Facts 1 and 3."
+          }
+        },
+        "llama3.1-70b": {
+          "gold_coverage_score": 0.475,
+          "safety_score": 0.5,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.52,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              4,
+              5,
+              6
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              1,
+              3
+            ],
+            "explanation": "The answer covers several key facts about AIP, including its symptoms, diagnosis, and management. It also highlights the importance of avoiding triggers and monitoring for safety red flags. However, it does not explicitly mention the use of hemin infusion as a key treatment for acute AIP attacks (fact #2). The answer does not contradict any of the gold facts.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 4, 5, 6],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [1, 3],\n  \"explanation\": \"The answer covers several key facts about AIP, including its symptoms, diagnosis, and management. It also highlights the importance of avoiding triggers and monitoring for safety red flags. However, it does not explicitly mention the use of hemin infusion as a key treatment for acute AIP attacks (fact #2). The answer does not contradict any of the gold facts.\"\n}\n```\n\nNote that the answer covers facts #0, #4, #5, and #6, which are related to the diagnosis and symptoms of AIP. It also covers safety-critical facts #1 and #3, which are related to the management and safety considerations of AIP. However, it does not explicitly mention fact #2, which is related to the treatment of AIP."
+          }
+        }
+      },
+      "models_failed": {},
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "mistral-large2",
+        "llama3.1-70b",
+        "openai-gpt-4.1"
+      ],
+      "disease_winner_reason": "claude-sonnet-4-6 won with higher final_score (0.838) than mistral-large2 (0.583); coverage=1.0 safety=0.75 contradiction_penalty=0.0.",
+      "answers": {
+        "claude-sonnet-4-6": "12126 chars",
+        "openai-gpt-4.1": "3179 chars",
+        "mistral-large2": "2877 chars",
+        "llama3.1-70b": "3407 chars"
+      }
+    },
+    {
+      "disease": "Gaucher disease type 1",
+      "case": "30-year-old with splenomegaly, thrombocytopenia, bone pain, and elevated ferritin.",
+      "papers": [],
+      "disease_gold_list": [
+        {
+          "fact": "Core diagnostic and management priorities for Gaucher disease type 1",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": []
+        }
+      ],
+      "model_scores": {
+        "claude-sonnet-4-6": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.0,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.65,
+          "judge_result": {
+            "covered_fact_ids": [
+              0
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [],
+            "explanation": "The answer provides a comprehensive overview of Gaucher Disease Type 1, including its diagnostic and management priorities, which aligns with the provided gold fact. The answer does not contradict any of the gold facts and does not cover any safety-critical information that is not already present in the gold facts.",
+            "judge_raw": "Here is the JSON output with the requested keys:\n\n```\n{\n  \"covered_fact_ids\": [0],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [],\n  \"explanation\": \"The answer provides a comprehensive overview of Gaucher Disease Type 1, including its diagnostic and management priorities, which aligns with the provided gold fact. The answer does not contradict any of the gold facts and does not cover any safety-critical information that is not already present in the gold facts.\"\n}\n```\n\nNote that th_covered_ids\" field is empty because the answer does not provide any new safety-critical information that is not already present in the gold facts."
+          }
+        },
+        "openai-gpt-4.1": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.0,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.683,
+          "judge_result": {
+            "covered_fact_ids": [
+              0
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [],
+            "explanation": "The answer covers the core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. The answer does not contradict any gold facts, and there are no safety-critical gold facts to cover.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [],\n  \"explanation\": \"The answer covers the core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. The answer does not contradict any gold facts, and there are no safety-critical gold facts to cover.\"\n}\n```\n\nNote that the answer does not explicitly mention the gold fact, but it covers the core diagnostic and management priorities for Gaucher disease type 1, which is the main topic of the gold fact."
+          }
+        },
+        "mistral-large2": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.0,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.65,
+          "judge_result": {
+            "covered_fact_ids": [
+              0
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [],
+            "explanation": "The answer covers the core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. However, it does not specifically address safety-critical aspects, so there are no safety-covered IDs.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [],\n  \"explanation\": \"The answer covers the core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. However, it does not specifically address safety-critical aspects, so there are no safety-covered IDs.\"\n}\n```\n\nNote that the answer provides a comprehensive analysis of Gaucher disease type 1, including its characteristics, diagnostic considerations, and management options, which aligns with the gold fact. However, since there are no safety-critical gold facts provided, the safety-covered IDs are empty."
+          }
+        },
+        "llama3.1-70b": {
+          "gold_coverage_score": 0.0,
+          "safety_score": 0.0,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.133,
+          "judge_result": {
+            "covered_fact_ids": [],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [],
+            "explanation": "The answer does not mention core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. Therefore, no facts are covered, contradicted, or related to safety.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [],\n  \"explanation\": \"The answer does not mention core diagnostic and management priorities for Gaucher disease type 1, which is the only gold fact provided. Therefore, no facts are covered, contradicted, or related to safety.\"\n}\n```\n\nNote that the answer provides a comprehensive overview of Gaucher disease type 1, including its diagnosis, management, and safety considerations. However, it does not specifically mention core diagnostic and management priorities, which is the only fact provided in the gold facts."
+          }
+        }
+      },
+      "models_failed": {},
+      "winner": "openai-gpt-4.1",
+      "ranking": [
+        "openai-gpt-4.1",
+        "claude-sonnet-4-6",
+        "mistral-large2",
+        "llama3.1-70b"
+      ],
+      "disease_winner_reason": "openai-gpt-4.1 won with higher final_score (0.683) than claude-sonnet-4-6 (0.65); coverage=1.0 safety=0.0 contradiction_penalty=0.0.",
+      "answers": {
+        "claude-sonnet-4-6": "10568 chars",
+        "openai-gpt-4.1": "2336 chars",
+        "mistral-large2": "2869 chars",
+        "llama3.1-70b": "2795 chars"
+      }
+    },
+    {
+      "disease": "Fabry disease",
+      "case": "28-year-old with burning extremity pain, angiokeratomas, proteinuria, and family history of early stroke.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/",
+          "snippet": "Fabry disease (FD) exhibits a spectrum of clinical manifestations ranging from mild to severe, posing a diagnostic challenge, particularly in non-classic subtypes. Genetic testing remains a gold standard for a precise diagnosis of FD and is pivotal in genetic counseling. Although conventional approaches such as Sanger sequencing and short-read next-generation sequencing (NGS) have been successfully used to diagnose FD, they often fail to detect deep intronic variants, complex rearrangements, or large deletions or duplications. In contrast, long-read sequencing (LRS) enables comprehensive coverage of intronic and repetitive regions, facilitating precise identification of atypical variants missed by conventional methods. This case series reports two unrelated male patients with clinical, enzymatic, and pathological features consistent with FD, who tested negative for pathogenic variants in the alpha-galactosidase A ( Fabry disease (FD) exhibits a spectrum of clinical manifestations ranging from mild to severe, posing a diagnostic challenge, particularly in non-classic subtypes. Genetic testing remains a gold standard for a precise diagnosis of FD and is pivotal in genetic counseling."
+        },
+        {
+          "source": "pubmed",
+          "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/",
+          "snippet": "Fabry disease (FD) is a rare X-linked lysosomal storage disorder caused by GLA gene mutations, leading to deficient \u03b1-galactosidase A (\u03b1-Gal A) activity and progressive accumulation of globotriaosylceramide (Gb3) and globotriaosylsphingosine (lyso-Gb3) in multiple tissues. Diagnosis remains challenging in late-onset renal-predominant phenotypes. Fabry disease (FD) is a rare X-linked lysosomal storage disorder caused by GLA gene mutations, leading to deficient \u03b1-galactosidase A (\u03b1-Gal A) activity and progressive accumulation of globotriaosylceramide (Gb3) and globotriaosylsphingosine (lyso-Gb3) in multiple tissues. Diagnosis remains challenging in late-onset renal-predominant phenotypes. A 72-year-old Chinese female presented with end-stage renal disease (ESRD) and hypertrophic cardiomyopathy, prompting a clinical suspicion of FD. The diagnosis was confirmed by the identification of a novel GLA missense variant, c.522T>G (p.Cys174Trp), which was classified as likely pathogenic. All tested family members who carried this variant exhibited the characteristic biochemical phenotype of reduced \u03b1-Gal A activity and elevated lyso-Gb3 levels. A 72-year-old Chinese female presented with end-"
+        },
+        {
+          "source": "pubmed",
+          "title": "Distinctive imaging of rare anterior subcapsular lens deposits in Fabry disease.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41577844/",
+          "snippet": ""
+        },
+        {
+          "source": "pubmed",
+          "title": "Elevated circulating cell-free mitochondrial DNA in fabry disease: insights into inflammatory activation.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41573578/",
+          "snippet": "This study aimed to investigate mitochondrial dysfunction and its role in the pathogenesis of Fabry disease (FD) by analyzing circulating cell-free DNA (ccf-DNA) in patients with FD. This study aimed to investigate mitochondrial dysfunction and its role in the pathogenesis of Fabry disease (FD) by analyzing circulating cell-free DNA (ccf-DNA) in patients with FD. Sixty-six FD patients and 21 healthy controls (ctrls) were enrolled. Levels of plasma mitochondrial- (ccf-mtDNA) and nuclear-derived ccf-DNA (ccf-nDNA) were quantified by quantitative reverse-transcription PCR (RT-qPCR), and 14 inflammatory cytokines were measured in treatment-na\u00efve patients. Associations among ccf-DNA levels, cytokine profiles, disease biomarkers, and clinical markers were analyzed, with subgroup analyses stratified by sex, genotype, clinical subtype, and disease severity. Sixty-six FD patients and 21 healthy controls (ctrls) were enrolled. Levels of plasma mitochondrial- (ccf-mtDNA) and nuclear-derived ccf-DNA (ccf-nDNA) were quantified by quantitative reverse-transcription PCR (RT-qPCR), and 14 inflammatory cytokines were measured in treatment-na\u00efve patients. Associations among ccf-DNA levels, cytokine "
+        },
+        {
+          "source": "pubmed",
+          "title": "Digital Health for Rare Diseases: A Scoping Review of Artificial Intelligence, Connected Care, and Enabling Digital Technologies for Lysosomal Storage Disorders.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41661224/",
+          "snippet": "Rare diseases (RDs) affect over 300 million people globally, and only about 5% have approved therapies. Lysosomal storage disorders (LSDs) exemplify the diagnostic and long-term care complexity typical of RDs, and digital health technologies (DHTs), especially artificial intelligence (AI) and connected care (CC), are increasingly reported as tools to support LSD management. Rare diseases (RDs) affect over 300 million people globally, and only about 5% have approved therapies. Lysosomal storage disorders (LSDs) exemplify the diagnostic and long-term care complexity typical of RDs, and digital health technologies (DHTs), especially artificial intelligence (AI) and connected care (CC), are increasingly reported as tools to support LSD management. This scoping review maps and synthesizes peer-reviewed and grey literature from the past decade on DHTs relevant for LSD care, with a primary analytic focus on AI-enabled and CC solutions, and a contextual mapping of other enabling DHTs. Evidence distribution is charted by population, care-journey phase, and outcome domains to identify gaps, methodological limitations, and timely priorities relevant for research, clinical practice implementat"
+        }
+      ],
+      "disease_gold_list": [
+        {
+          "fact": "Conventional Sanger sequencing and short-read NGS often fail to detect deep intronic variants, complex rearrangements, or large deletions/duplications in GLA",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Long-read sequencing (LRS) enables comprehensive coverage of intronic and repetitive regions, facilitating identification of atypical GLA variants missed by conventional methods",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Patients with clinical, enzymatic, and pathological features consistent with Fabry disease may test negative for pathogenic variants using conventional sequencing approaches due to non-coding variants",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Negative conventional genetic testing does not exclude Fabry disease when clinical, enzymatic, and pathological features are consistent with the diagnosis",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Long-read sequencing should be considered when conventional sequencing is negative but clinical suspicion for Fabry disease remains high",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Late-onset renal-predominant phenotype of Fabry disease presents diagnostic challenges",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Fabry disease can present with end-stage renal disease (ESRD) and hypertrophic cardiomyopathy, particularly in late-onset female cases",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Hypertrophic cardiomyopathy in combination with ESRD should prompt clinical suspicion for Fabry disease",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Family members carrying the GLA variant should be tested for reduced \u03b1-Gal A activity and elevated lyso-Gb3 levels due to X-linked inheritance",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Fabry disease is X-linked, meaning female carriers can manifest disease, including renal and cardiac involvement",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Renal-predominant Fabry disease may present as unexplained ESRD and should be included in the differential diagnosis",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Case Report: Novel GLA mutation in a Chinese female with renal-predominant Fabry disease and cardiac hypertrophy.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41584929/"
+            }
+          ]
+        },
+        {
+          "fact": "Only approximately 5% of rare diseases, including many lysosomal storage disorders, have approved therapies, highlighting significant treatment gaps",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Digital Health for Rare Diseases: A Scoping Review of Artificial Intelligence, Connected Care, and Enabling Digital Technologies for Lysosomal Storage Disorders.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41661224/"
+            }
+          ]
+        },
+        {
+          "fact": "Genetic testing is the gold standard for precise diagnosis of Fabry disease and is pivotal in genetic counseling",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Fabry disease exhibits a spectrum of clinical manifestations ranging from mild to severe, posing a diagnostic challenge particularly in non-classic subtypes",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        },
+        {
+          "fact": "Non-coding (deep intronic) variants in GLA represent a new class of pathogenic variants causing Fabry disease",
+          "category": "diagnosis",
+          "weight": 1.0,
+          "priority": "medium",
+          "safety_critical": false,
+          "evidence_refs": [
+            {
+              "title": "A New Class of Pathogenic Non-Coding Variants in GLA.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41596592/"
+            }
+          ]
+        }
+      ],
+      "model_scores": {
+        "claude-sonnet-4-6": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.083,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.704,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3
+            ],
+            "explanation": "The provided answer covers all the gold facts and does not contradict any of them. The safety-critical fact (ID 3) is covered in the answer, which emphasizes the importance of considering Fabry disease in patients with clinical, enzymatic, and pathological features consistent with the diagnosis, even if conventional genetic testing is negative.",
+            "judge_raw": "Here is the JSON output with the requested keys:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3],\n  \"explanation\": \"The provided answer covers all the gold facts and does not contradict any of them. The safety-critical fact (ID 3) is covered in the answer, which emphasizes the importance of considering Fabry disease in patients with clinical, enzymatic, and pathological features consistent with the diagnosis, even if conventional genetic testing is negative.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes all the gold fact IDs, indicating that the answer covers all the provided facts. The \"contradicted_fact_ids\" list is empty, indicating that the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes fact ID 3, which is a safety-critical fact that is covered in the answer."
+          }
+        },
+        "openai-gpt-4.1": {
+          "gold_coverage_score": 0.927,
+          "safety_score": 0.417,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.747,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              4,
+              8,
+              9,
+              10
+            ],
+            "explanation": "The answer covers various aspects of Fabry disease, including its symptoms, diagnosis, and management. It mentions the importance of genetic testing, enzyme replacement therapy, and monitoring for organ involvement. The answer also highlights the need for prompt referral to a specialist and symptomatic management. The safety red flags mentioned include rapidly worsening renal function, cardiac arrhythmias or hypertrophy, and stroke symptoms. The answer does not contradict any of the gold facts and covers several safety-critical facts.",
+            "judge_raw": "{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 4, 8, 9, 10],\n  \"explanation\": \"The answer covers various aspects of Fabry disease, including its symptoms, diagnosis, and management. It mentions the importance of genetic testing, enzyme replacement therapy, and monitoring for organ involvement. The answer also highlights the need for prompt referral to a specialist and symptomatic management. The safety red flags mentioned include rapidly worsening renal function, cardiac arrhythmias or hypertrophy, and stroke symptoms. The answer does not contradict any of the gold facts and covers several safety-critical facts.\"\n}"
+          }
+        },
+        "mistral-large2": {
+          "gold_coverage_score": 0.927,
+          "safety_score": 0.25,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.706,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              8,
+              9
+            ],
+            "explanation": "The answer covers various aspects of Fabry disease, including its symptoms, diagnosis, and management. It mentions the importance of genetic testing, enzyme replacement therapy, and monitoring for cardiac and renal complications. The answer also highlights the challenges in diagnosing Fabry disease, particularly in late-onset cases. The provided references support the information presented in the answer. No contradictions were found with the gold facts.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 8, 9],\n  \"explanation\": \"The answer covers various aspects of Fabry disease, including its symptoms, diagnosis, and management. It mentions the importance of genetic testing, enzyme replacement therapy, and monitoring for cardiac and renal complications. The answer also highlights the challenges in diagnosing Fabry disease, particularly in late-onset cases. The provided references support the information presented in the answer. No contradictions were found with the gold facts.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes the IDs of the gold facts that are supported or mentioned in the answer. The \"contradicted_fact_ids\" list is empty, indicating that no contradictions were found. The \"safety_covered_ids\" list includes the IDs of the safety-critical gold facts that are covered in the answer."
+          }
+        },
+        "llama3.1-70b": {
+          "gold_coverage_score": 0.854,
+          "safety_score": 0.417,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.707,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              6,
+              7,
+              8,
+              9,
+              10,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              3,
+              6,
+              7,
+              9,
+              10
+            ],
+            "explanation": "The answer covers several key facts about Fabry disease, including its symptoms, diagnosis, and management. It also highlights the importance of genetic testing, enzyme assays, and imaging studies in confirming the diagnosis. The answer also mentions safety red flags, such as sudden cardiac death, renal failure, and stroke, which are consistent with the safety-critical facts. However, the answer does not contradict any of the gold facts.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [3, 6, 7, 9, 10],\n  \"explanation\": \"The answer covers several key facts about Fabry disease, including its symptoms, diagnosis, and management. It also highlights the importance of genetic testing, enzyme assays, and imaging studies in confirming the diagnosis. The answer also mentions safety red flags, such as sudden cardiac death, renal failure, and stroke, which are consistent with the safety-critical facts. However, the answer does not contradict any of the gold facts.\"\n}\n```\n\nNote that the `covered_fact_ids` list includes facts that are directly mentioned or implied in the answer, while the `safety_covered_ids` list includes facts that are related to safety-critical aspects of Fabry disease. The `contradicted_fact_ids` list is empty, indicating that the answer does not contradict any of the gold facts."
+          }
+        }
+      },
+      "models_failed": {},
+      "winner": "openai-gpt-4.1",
+      "ranking": [
+        "openai-gpt-4.1",
+        "llama3.1-70b",
+        "mistral-large2",
+        "claude-sonnet-4-6"
+      ],
+      "disease_winner_reason": "openai-gpt-4.1 won with higher final_score (0.747) than llama3.1-70b (0.707); coverage=0.927 safety=0.417 contradiction_penalty=0.0.",
+      "answers": {
+        "claude-sonnet-4-6": "11027 chars",
+        "openai-gpt-4.1": "4082 chars",
+        "mistral-large2": "3604 chars",
+        "llama3.1-70b": "3349 chars"
+      }
+    },
+    {
+      "disease": "Hereditary angioedema",
+      "case": "19-year-old with recurrent non-urticarial swelling episodes, abdominal attacks, and low C4.",
+      "papers": [
+        {
+          "source": "pubmed",
+          "title": "Ecological momentary assessments for patients with hereditary angioedema: a feasibility and acceptability controlled study.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41602209/",
+          "snippet": "Hereditary angioedema (HAE) is a rare disease imposing a significant quality of life burden. Affect monitoring via Ecological Momentary Assessment (EMA) could offer personalized psychological support by collecting repeated, ecological data in real-life, overcoming the limitations of traditional methods. This study assessed the feasibility and acceptability of an EMA protocol for affect monitoring in HAE patients vs. healthy controls (CTR). Hereditary angioedema (HAE) is a rare disease imposing a significant quality of life burden. Affect monitoring via Ecological Momentary Assessment (EMA) could offer personalized psychological support by collecting repeated, ecological data in real-life, overcoming the limitations of traditional methods. This study assessed the feasibility and acceptability of an EMA protocol for affect monitoring in HAE patients vs. healthy controls (CTR). HAE patients and CTR were recruited for a 16-week EMA study. Participants received weekly EMA surveys assessing affect via REDCap\u2122. Feasibility was evaluated through recruitment, response, and completion rates. Acceptability was assessed via a post-study questionnaire through a visual analogue scale ranging fro"
+        },
+        {
+          "source": "pubmed",
+          "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/",
+          "snippet": "Hereditary angioedema (HAE) is a rare condition characterized by episodic subcutaneous or mucosal edema, which may pose significant challenges in the perioperative setting. We report the management of a 79\u2011year-old male patient undergoing transurethral resection of a bladder tumor under general anesthesia with a supraglottic airway device. Postoperatively, the patient developed acute facial edema requiring prompt recognition and disease\u2011specific intervention. Rapid resolution was achieved, and the patient had an uneventful recovery. This case underscores the importance of perioperative awareness, early recognition, and careful planning to prevent airway complications in patients with HAE. Hereditary angioedema (HAE) is a rare condition characterized by episodic subcutaneous or mucosal edema, which may pose significant challenges in the perioperative setting. We report the management of a 79\u2011year-old male patient undergoing transurethral resection of a bladder tumor under general anesthesia with a supraglottic airway device. Postoperatively, the patient developed acute facial edema requiring prompt recognition and disease\u2011specific intervention. Rapid resolution was achieved, and the"
+        },
+        {
+          "source": "pubmed",
+          "title": "Attack rate reductions following berotralstat initiation among US patients with hereditary angioedema in the real-world.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41582175/",
+          "snippet": "Hereditary angioedema (HAE) causes recurring swelling attacks, leading to substantial disease burden. This real-world, retrospective study aimed to evaluate HAE attack rates before and after berotralstat initiation stratified by patients' baseline attack frequency. Hereditary angioedema (HAE) causes recurring swelling attacks, leading to substantial disease burden. This real-world, retrospective study aimed to evaluate HAE attack rates before and after berotralstat initiation stratified by patients' baseline attack frequency. Specialty Pharmacy data from Optime Care, Inc. (12/2020-01/2024), the sole berotralstat dispenser in the United States, were analyzed. Eligible patients had\u00a0\u2009\u2265\u20092 berotralstat dispensings (first\u00a0=\u00a0\u2009index) and \u2265\u20091 self-assessment of attacks at baseline (90-days pre-index) and follow-up (first-to-last dispensing). Patients were classified by HAE type (based on laboratory measurements) and baseline attacks (\u2265\u20095, 2-4, 1, and 0 attacks/month). Follow-up attack rates were compared with baseline using mean differences, confidence intervals, and P-values. Among those with 0 baseline attacks/month, proportions with 0 follow-up attacks/month were assessed. Specialty Phar"
+        },
+        {
+          "source": "pubmed",
+          "title": "Functional physiological, psychological, and biochemical reactivity to socially evaluated cold pressor test in hereditary angioedema patients (FRoSEn).",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41573571/",
+          "snippet": "Stressful physical or psychological events can trigger acute swelling attacks in patients with Hereditary Angioedema due to C1 Inhibitor deficiency (HAE-C1INH), although the stress-disease relationship remains unclear. The Socially Evaluated Cold Pressor Test (SECPT) reliably induces acute stress under controlled conditions. This study aimed to compare perceived stress, inflammatory markers, and cardiovascular responses to SECPT between HAE-C1INH patients and healthy controls (HC). Stressful physical or psychological events can trigger acute swelling attacks in patients with Hereditary Angioedema due to C1 Inhibitor deficiency (HAE-C1INH), although the stress-disease relationship remains unclear. The Socially Evaluated Cold Pressor Test (SECPT) reliably induces acute stress under controlled conditions. This study aimed to compare perceived stress, inflammatory markers, and cardiovascular responses to SECPT between HAE-C1INH patients and healthy controls (HC). Twenty HAE-C1INH patients (9 males, 44 \u00b1 14 years) and age and sex matched HC underwent a 3-minute SECPT. Participants completed questionnaires assessing anxiety and depression (HADS), pain catastrophizing (PCS), and subjectiv"
+        },
+        {
+          "source": "pubmed",
+          "title": "Burden of hereditary angioedema: results from a multinational survey of caregivers for adult and pediatric patients.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41680909/",
+          "snippet": "Hereditary angioedema (HAE), a rare autosomal dominant disorder characterized by recurrent, potentially life-threatening attacks of cutaneous or submucosal swelling, affects patients' everyday activities and psychological well-being. Although caregivers are instrumental in helping patients cope with HAE, its impact on the caregivers' quality of life is poorly documented. Using web-based surveys (July 2022\u2012February 2023), this international study (Argentina, Brazil, Colombia, Croatia, Denmark, Germany, Hungary, Ireland, Norway, Poland, Portugal, Romania, and Sweden) assessed the humanistic and psychosocial burden of caregivers (\u2265\u200918 years old) of pediatric (<\u200918 years) and adult (\u2265\u200918 years) patients with diagnosed HAE. Hereditary angioedema (HAE), a rare autosomal dominant disorder characterized by recurrent, potentially life-threatening attacks of cutaneous or submucosal swelling, affects patients' everyday activities and psychological well-being. Although caregivers are instrumental in helping patients cope with HAE, its impact on the caregivers' quality of life is poorly documented. Using web-based surveys (July 2022\u2012February 2023), this international study (Argentina, Brazil, C"
+        }
+      ],
+      "disease_gold_list": [
+        {
+          "fact": "HAE poses significant challenges in the perioperative setting due to risk of airway compromise",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Laryngeal mask airway (supraglottic airway device) can trigger HAE attacks perioperatively",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Mechanical trauma from airway devices (e.g., laryngeal mask airway) is a known trigger for HAE episodes",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Postoperative acute facial edema developed following use of supraglottic airway device in an HAE patient",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Prompt recognition of HAE attack and disease-specific intervention led to rapid resolution",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Disease-specific treatment should be immediately available perioperatively for HAE patients",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Perioperative awareness and early recognition of HAE attacks are critical to prevent life-threatening airway complications",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Careful perioperative planning is required for HAE patients to prevent airway complications",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "HAE should be considered in the differential diagnosis of postoperative facial or airway edema",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Anesthetic technique selection (airway device choice) has direct implications for HAE attack risk",
+          "category": "safety",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "Preoperative identification of HAE diagnosis is essential for safe anesthetic management",
+          "category": "diagnostics",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Perioperative Hereditary Angioedema Triggered by Laryngeal Mask Airway: A Case Report and Anesthetic Implications.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41583330/"
+            }
+          ]
+        },
+        {
+          "fact": "HAE is a hereditary condition requiring long-term prophylactic management to reduce recurrent swelling episodes",
+          "category": "treatment",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Attack rate reductions following berotralstat initiation among US patients with hereditary angioedema in the real-world.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41582175/"
+            }
+          ]
+        },
+        {
+          "fact": "HAE differential includes other causes of recurrent angioedema (e.g., allergic angioedema, ACE inhibitor-induced angioedema, acquired C1-inhibitor deficiency)",
+          "category": "differential",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Attack rate reductions following berotralstat initiation among US patients with hereditary angioedema in the real-world.",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41582175/"
+            }
+          ]
+        },
+        {
+          "fact": "Hereditary Angioedema due to C1 Inhibitor deficiency (HAE-C1INH) is characterized by acute swelling attacks that can be triggered by stressful physical or psychological events",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Functional physiological, psychological, and biochemical reactivity to socially evaluated cold pressor test in hereditary angioedema patients (FRoSEn).",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41573571/"
+            }
+          ]
+        },
+        {
+          "fact": "Both physical and psychological stress are recognized triggers for acute HAE-C1INH swelling attacks",
+          "category": "diagnosis",
+          "weight": 1.75,
+          "priority": "high",
+          "safety_critical": true,
+          "evidence_refs": [
+            {
+              "title": "Functional physiological, psychological, and biochemical reactivity to socially evaluated cold pressor test in hereditary angioedema patients (FRoSEn).",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/41573571/"
+            }
+          ]
+        }
+      ],
+      "model_scores": {
+        "claude-sonnet-4-6": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.733,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.833,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "explanation": "The provided answer covers all the gold facts related to Hereditary Angioedema (HAE), including its diagnosis, treatment, and safety considerations. The answer provides a comprehensive overview of HAE, including its clinical presentation, diagnostic criteria, and management options. The safety considerations are also thoroughly discussed, including the risk of airway compromise and the importance of prompt recognition and treatment. The answer does not contradict any of the gold facts and provides a detailed explanation of the condition and its management.",
+            "judge_raw": "Here is the JSON output with the requested keys:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],\n  \"explanation\": \"The provided answer covers all the gold facts related to Hereditary Angioedema (HAE), including its diagnosis, treatment, and safety considerations. The answer provides a comprehensive overview of HAE, including its clinical presentation, diagnostic criteria, and management options. The safety considerations are also thoroughly discussed, including the risk of airway compromise and the importance of prompt recognition and treatment. The answer does not contradict any of the gold facts and provides a detailed explanation of the condition and its management.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes all the fact IDs from the gold facts, as the answer covers all the relevant information. The \"contradicted_fact_ids\" list is empty, as the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the fact IDs related to safety considerations, which are thoroughly discussed in the answer."
+          }
+        },
+        "openai-gpt-4.1": {
+          "gold_coverage_score": 0.533,
+          "safety_score": 0.467,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.51,
+          "judge_result": {
+            "covered_fact_ids": [
+              1,
+              2,
+              3,
+              6,
+              9,
+              10,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              0,
+              1,
+              2,
+              3,
+              6,
+              9,
+              10
+            ],
+            "explanation": "The answer covers several key facts related to hereditary angioedema (HAE), including its diagnosis, triggers, and management. It also highlights the importance of airway assessment and safety considerations. However, it does not explicitly mention some critical safety facts, such as the need for disease-specific treatment to be immediately available perioperatively (Fact 5) and the importance of preoperative identification of HAE diagnosis for safe anesthetic management (Fact 10).",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [1, 2, 3, 6, 9, 10, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [0, 1, 2, 3, 6, 9, 10],\n  \"explanation\": \"The answer covers several key facts related to hereditary angioedema (HAE), including its diagnosis, triggers, and management. It also highlights the importance of airway assessment and safety considerations. However, it does not explicitly mention some critical safety facts, such as the need for disease-specific treatment to be immediately available perioperatively (Fact 5) and the importance of preoperative identification of HAE diagnosis for safe anesthetic management (Fact 10).\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes facts that are directly mentioned or implied in the answer, while the \"safety_covered_ids\" list includes facts that are related to safety considerations. The \"contradicted_fact_ids\" list is empty since the answer does not contradict any of the gold facts."
+          }
+        },
+        "mistral-large2": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.733,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.5,
+          "final_score": 0.833,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "explanation": "The answer covers all the gold facts and does not contradict any of them. The safety-critical facts are also well-covered, with the answer discussing the risks of airway compromise, the importance of prompt recognition and treatment, and the need for careful perioperative planning.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],\n  \"explanation\": \"The answer covers all the gold facts and does not contradict any of them. The safety-critical facts are also well-covered, with the answer discussing the risks of airway compromise, the importance of prompt recognition and treatment, and the need for careful perioperative planning.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes all the gold fact IDs, indicating that the answer covers all the provided facts. The \"contradicted_fact_ids\" list is empty, indicating that the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the IDs of the safety-critical facts that are covered in the answer."
+          }
+        },
+        "llama3.1-70b": {
+          "gold_coverage_score": 1.0,
+          "safety_score": 0.733,
+          "contradiction_penalty": 0.0,
+          "structure_score": 0.667,
+          "final_score": 0.867,
+          "judge_result": {
+            "covered_fact_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14
+            ],
+            "contradicted_fact_ids": [],
+            "safety_covered_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10
+            ],
+            "explanation": "The answer covers all the gold facts and does not contradict any of them. The safety-critical facts are also well-covered, with the answer emphasizing the importance of airway patency, oxygenation, and prompt recognition of HAE attacks. The answer also provides a comprehensive differential diagnosis and recommends appropriate diagnostic tests and initial management strategies.",
+            "judge_raw": "Here is the evaluation of the answer against the provided gold facts in JSON format:\n\n```\n{\n  \"covered_fact_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],\n  \"contradicted_fact_ids\": [],\n  \"safety_covered_ids\": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],\n  \"explanation\": \"The answer covers all the gold facts and does not contradict any of them. The safety-critical facts are also well-covered, with the answer emphasizing the importance of airway patency, oxygenation, and prompt recognition of HAE attacks. The answer also provides a comprehensive differential diagnosis and recommends appropriate diagnostic tests and initial management strategies.\"\n}\n```\n\nNote that the \"covered_fact_ids\" list includes all the gold fact IDs, indicating that the answer covers all the provided facts. The \"contradicted_fact_ids\" list is empty, indicating that the answer does not contradict any of the gold facts. The \"safety_covered_ids\" list includes the IDs of the safety-critical facts that are well-covered in the answer."
+          }
+        }
+      },
+      "models_failed": {},
+      "winner": "llama3.1-70b",
+      "ranking": [
+        "llama3.1-70b",
+        "claude-sonnet-4-6",
+        "mistral-large2",
+        "openai-gpt-4.1"
+      ],
+      "disease_winner_reason": "llama3.1-70b won with higher final_score (0.867) than claude-sonnet-4-6 (0.833); coverage=1.0 safety=0.733 contradiction_penalty=0.0.",
+      "answers": {
+        "claude-sonnet-4-6": "11595 chars",
+        "openai-gpt-4.1": "4051 chars",
+        "mistral-large2": "3072 chars",
+        "llama3.1-70b": "2662 chars"
+      }
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "mode": "rare-judge",
+  "disease": "Wilson disease",
+  "judge_model": "claude-sonnet-4-6",
+  "models_requested": [
+    "openai-gpt-4.1",
+    "claude-sonnet-4-6"
+  ],
+  "models_answered": [
+    "openai-gpt-4.1",
+    "claude-sonnet-4-6"
+  ],
+  "models_failed": {},
+  "winner": "claude-sonnet-4-6",
+  "ranking": [
+    "claude-sonnet-4-6",
+    "openai-gpt-4.1"
+  ],
+  "judge": {
+    "judge_model": "claude-sonnet-4-6",
+    "raw": "```json\n{\n  \"winner\": \"claude-sonnet-4-6\",\n  \"ranking\": [\"claude-sonnet-4-6\", \"openai-gpt-4.1\"],\n  \"scores\": {\n    \"claude-sonnet-4-6\": 9.2,\n    \"openai-gpt-4.1\": 7.8\n  },\n  \"rationale\": {\n    \"overall\": \"Both models correctly identified Wilson disease as the leading diagnosis and covered core management principles. However, claude-sonnet-4-6 demonstrated substantially greater clinical depth, safety awareness, and actionability across nearly every domain.\",\n    \"clinical_accuracy\": {\n      \"claude-sonnet-4-6\": \"Exceptional accuracy. Correctly noted the pathognomonic low ALP in WD-associated ALF \u2014 a critical and often-missed finding. Included the Leipzig scoring system with correct point values, accurate sensitivity/specificity context for KF rings (>95% in neurological WD, ~50% in hepatic-predominant), and correctly distinguished free vs. total serum copper interpretation. Accurately flagged D-penicillamine's risk of neurological worsening (~20-50%) and positioned trientine as preferred for neurological WD per current guidelines.\",\n      \"openai-gpt-4.1\": \"Clinically accurate at a general level. Correctly identified core diagnostic tests and treatment options. However, missed the critical low ALP finding in WD-ALF, did not include Leipzig scoring, and did not differentiate between D-penicillamine and trientine in terms of neurological risk \u2014 a clinically important distinction.\"\n    },\n    \"safety\": {\n      \"claude-sonnet-4-6\": \"Outstanding safety coverage. Explicitly flagged WD-ALF as a >95% mortality condition without transplant, emphasized that low ALP + elevated bilirubin + hemolysis is a red flag constellation, recommended immediate transplant team involvement, and warned against hepatotoxic medications and specific drug classes. The Wilson Disease Index reference for ALF prognostication adds further safety value.\",\n      \"openai-gpt-4.1\": \"Adequate safety coverage with appropriate red flags (coagulopathy, encephalopathy, hemolysis, renal dysfunction) and mention of liver transplantation. However, lacked the specificity of the low-ALP warning and did not quantify mortality risk or emphasize urgency of transplant evaluation with the same clinical precision.\"\n    },\n    \"actionability\": {\n      \"claude-sonnet-4-6\": \"Highly actionable. Tiered diagnostics (Tier 1 within 24-48h, Tier 2 within 48-72h) with specific thresholds (urine copper >100 \u00b5g/24h, ceruloplasmin <20 mg/dL, hepatic copper >250 \u00b5g/g dry weight). Specific drug dosing with titration schedules, monitoring parameters with frequencies, and dietary restrictions. Leipzig scoring enables immediate clinical application.\",\n      \"openai-gpt-4.1\": \"Actionable but less specific. Diagnostic list is comprehensive but lacks thresholds and prioritization. Treatment recommendations name the correct agents but omit dosing, titration, and monitoring schedules that a clinician would need at the bedside.\"\n    },\n    \"uncertainty_handling\": {\n      \"claude-sonnet-4-6\": \"Excellent. Explicitly listed six specific data gaps with clinical implications for each. Assigned probability ranges to differential diagnoses (e.g., WD 75-85%). Noted that low ceruloplasmin alone is non-specific and listed alternative causes. Acknowledged KF ring absence in hepatic-predominant WD.\",\n      \"openai-gpt-4.1\": \"Good uncertainty handling. Listed missing data points and noted absence of KF rings and family history. Differential was appropriately broad. However, did not assign confidence levels to differentials and uncertainty discussion was less granular.\"\n    },\n    \"structure_quality\": {\n      \"claude-sonnet-4-6\": \"Excellent structure with tables, tiered checklists, color-coded alerts, and a clear disclaimer. The Leipzig scoring table is immediately usable. Monitoring table adds long-term management guidance often absent in acute-focused answers.\",\n      \"openai-gpt-4.1\": \"Clean, well-organized structure with clear headers and bullet points. Appropriately concise. Slightly less rich in visual organization and clinical tools but highly readable.\"\n    },\n    \"key_differentiator\": \"The low ALP finding in WD-ALF, the Leipzig scoring system with correct values, the neurological worsening risk differentiation between chelators, the >95% mortality statistic for WD-ALF without transplant, and the tiered diagnostic approach with specific quantitative thresholds collectively elevate claude-sonnet-4-6 to a significantly higher clinical utility level for a rare disease case where these nuances are life-critical.\"\n  }\n}\n```",
+    "parsed": {
+      "winner": "claude-sonnet-4-6",
+      "ranking": [
+        "claude-sonnet-4-6",
+        "openai-gpt-4.1"
+      ],
+      "scores": {
+        "claude-sonnet-4-6": 9.2,
+        "openai-gpt-4.1": 7.8
+      },
+      "rationale": {
+        "overall": "Both models correctly identified Wilson disease as the leading diagnosis and covered core management principles. However, claude-sonnet-4-6 demonstrated substantially greater clinical depth, safety awareness, and actionability across nearly every domain.",
+        "clinical_accuracy": {
+          "claude-sonnet-4-6": "Exceptional accuracy. Correctly noted the pathognomonic low ALP in WD-associated ALF \u2014 a critical and often-missed finding. Included the Leipzig scoring system with correct point values, accurate sensitivity/specificity context for KF rings (>95% in neurological WD, ~50% in hepatic-predominant), and correctly distinguished free vs. total serum copper interpretation. Accurately flagged D-penicillamine's risk of neurological worsening (~20-50%) and positioned trientine as preferred for neurological WD per current guidelines.",
+          "openai-gpt-4.1": "Clinically accurate at a general level. Correctly identified core diagnostic tests and treatment options. However, missed the critical low ALP finding in WD-ALF, did not include Leipzig scoring, and did not differentiate between D-penicillamine and trientine in terms of neurological risk \u2014 a clinically important distinction."
+        },
+        "safety": {
+          "claude-sonnet-4-6": "Outstanding safety coverage. Explicitly flagged WD-ALF as a >95% mortality condition without transplant, emphasized that low ALP + elevated bilirubin + hemolysis is a red flag constellation, recommended immediate transplant team involvement, and warned against hepatotoxic medications and specific drug classes. The Wilson Disease Index reference for ALF prognostication adds further safety value.",
+          "openai-gpt-4.1": "Adequate safety coverage with appropriate red flags (coagulopathy, encephalopathy, hemolysis, renal dysfunction) and mention of liver transplantation. However, lacked the specificity of the low-ALP warning and did not quantify mortality risk or emphasize urgency of transplant evaluation with the same clinical precision."
+        },
+        "actionability": {
+          "claude-sonnet-4-6": "Highly actionable. Tiered diagnostics (Tier 1 within 24-48h, Tier 2 within 48-72h) with specific thresholds (urine copper >100 \u00b5g/24h, ceruloplasmin <20 mg/dL, hepatic copper >250 \u00b5g/g dry weight). Specific drug dosing with titration schedules, monitoring parameters with frequencies, and dietary restrictions. Leipzig scoring enables immediate clinical application.",
+          "openai-gpt-4.1": "Actionable but less specific. Diagnostic list is comprehensive but lacks thresholds and prioritization. Treatment recommendations name the correct agents but omit dosing, titration, and monitoring schedules that a clinician would need at the bedside."
+        },
+        "uncertainty_handling": {
+          "claude-sonnet-4-6": "Excellent. Explicitly listed six specific data gaps with clinical implications for each. Assigned probability ranges to differential diagnoses (e.g., WD 75-85%). Noted that low ceruloplasmin alone is non-specific and listed alternative causes. Acknowledged KF ring absence in hepatic-predominant WD.",
+          "openai-gpt-4.1": "Good uncertainty handling. Listed missing data points and noted absence of KF rings and family history. Differential was appropriately broad. However, did not assign confidence levels to differentials and uncertainty discussion was less granular."
+        },
+        "structure_quality": {
+          "claude-sonnet-4-6": "Excellent structure with tables, tiered checklists, color-coded alerts, and a clear disclaimer. The Leipzig scoring table is immediately usable. Monitoring table adds long-term management guidance often absent in acute-focused answers.",
+          "openai-gpt-4.1": "Clean, well-organized structure with clear headers and bullet points. Appropriately concise. Slightly less rich in visual organization and clinical tools but highly readable."
+        },
+        "key_differentiator": "The low ALP finding in WD-ALF, the Leipzig scoring system with correct values, the neurological worsening risk differentiation between chelators, the >95% mortality statistic for WD-ALF without transplant, and the tiered diagnostic approach with specific quantitative thresholds collectively elevate claude-sonnet-4-6 to a significantly higher clinical utility level for a rare disease case where these nuances are life-critical."
+      }
+    }
+  },
+  "answers": {
+    "openai-gpt-4.1": "2836 chars",
+    "claude-sonnet-4-6": "9088 chars"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "mode": "answers",
+  "n_questions": 1,
+  "summary": {
+    "gemini_wins": 0,
+    "cortex_wins": 0,
+    "ties": 0,
+    "latency_median_s": null
+  },
+  "results": [
+    {
+      "question": "Child with fever and rash differential diagnosis",
+      "error": "500 Server Error: Internal Server Error for url: http://127.0.0.1:8000/ask-both"
+    }
+  ]
+}
