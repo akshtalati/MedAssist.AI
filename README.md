@@ -6,6 +6,8 @@
 
 > **Important:** This software is **not** a medical device and **does not** replace professional judgment. It is for **education, research, and engineering demos**. Follow local regulations and clinical governance for any real-world use.
 
+**project log link -** https://northeastern-my.sharepoint.com/:w:/g/personal/ganeshe_n_northeastern_edu/IQA3_QRp630OSZunye-64xC8Acax5ZQ9c4tVhoLtLVS9uJQ?e=CYpnsQ
+
 ---
 
 ## What the unified doctor app does

@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 
-MAX_TURNS_DEFAULT = 25
+MAX_TURNS_DEFAULT = 5
 
 # Ordered: symptom keyword → question + short UI answer choices (Streamlit adds "None of the above").
-# Choices are disjoint labels persisted as the clinician answer string prefix "Selected: …".
+# Choices are labels persisted as the clinician answer string prefix "Selected: …" (one or more, joined for checkboxes).
 QUESTION_RULES: list[tuple[str, str, tuple[str, ...]]] = [
     (
         "fever",

@@ -91,3 +91,61 @@ def test_ask_returns_evidence_and_fallback_mode(monkeypatch):
     assert body["fallback_mode"] == "web_assisted"
     assert isinstance(body.get("evidence_sources"), list)
 
+
+def test_ask_doctor_falls_back_to_cortex_when_agent_not_configured(monkeypatch):
+    monkeypatch.setattr(main, "is_cortex_agent_ready", lambda: False)
+    monkeypatch.setattr(
+        main,
+        "retrieve_evidence_journal_first",
+        lambda question, limit=30: (
+            [{"source": "pubmed", "title": "Study", "url": "https://pubmed.ncbi.nlm.nih.gov/2/", "text": "snippet"}],
+            "web_assisted",
+        ),
+    )
+    monkeypatch.setattr(main, "fetch_symptom_disease_context", lambda question, limit=50: "")
+    monkeypatch.setattr(main, "cortex_complete", lambda prompt: "### Summary\nok")
+    monkeypatch.setattr(
+        main,
+        "_evaluate_evidence_quality",
+        lambda entries: {"sufficient": True, "score": 0.85, "trusted_count": 1, "count": 1},
+    )
+    client = TestClient(main.app)
+    res = client.post("/ask-doctor", json={"question": "fever and headache", "brief": False})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["provider"] == "cortex"
+    assert body.get("fallback_chain") == ["cortex"]
+
+
+def test_ask_doctor_uses_agent_when_ready(monkeypatch):
+    monkeypatch.setattr(main, "is_cortex_agent_ready", lambda: True)
+    monkeypatch.setattr(
+        main,
+        "retrieve_evidence_journal_first",
+        lambda question, limit=30: (
+            [{"source": "pubmed", "title": "Study", "url": "https://pubmed.ncbi.nlm.nih.gov/2/", "text": "snippet"}],
+            "journal_first",
+        ),
+    )
+    monkeypatch.setattr(main, "fetch_symptom_disease_context", lambda question, limit=50: "")
+    monkeypatch.setattr(
+        main,
+        "_evaluate_evidence_quality",
+        lambda entries: {"sufficient": True, "score": 0.85, "trusted_count": 1, "count": 1},
+    )
+    monkeypatch.setattr(main, "agent_config_from_env", lambda: {"database": "D", "schema": "S", "agent_name": "A"})
+    monkeypatch.setattr(
+        main,
+        "run_cortex_agent_object",
+        lambda **kwargs: (
+            {"role": "assistant", "content": [{"type": "text", "text": "From agent."}]},
+            None,
+        ),
+    )
+    client = TestClient(main.app)
+    res = client.post("/ask-doctor", json={"question": "what is X", "brief": False})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["provider"] == "snowflake_cortex_agent"
+    assert body.get("fallback_chain") == ["snowflake_cortex_agent"]
+

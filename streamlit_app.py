@@ -19,8 +19,11 @@ import streamlit as st
 
 from src.indexing import SymptomIndex
 from src.clinical_workflow import normalize_encounter_dict
+from src.followup_policy import MAX_TURNS_DEFAULT
 
 DEFAULT_API_URL = os.environ.get("MEDASSIST_API_BASE", "http://127.0.0.1:8000")
+# Doctor Q&A uses /ask-doctor: Snowflake Cortex Agent first (if PAT+agent env set), else Cortex → Gemini.
+_DOCTOR_QA_AI_MODE = "Doctor default (Agent → Cortex → Gemini)"
 _log = logging.getLogger("medassist.streamlit")
 
 # region agent log
@@ -325,7 +328,7 @@ def query_rare_diseases(symptoms: list[str], max_rows: int) -> tuple[list[dict[s
 
 
 def ask_llm(api_url: str, question: str, brief: bool) -> dict:
-    url = api_url.rstrip("/") + "/ask"
+    url = api_url.rstrip("/") + "/ask-doctor"
     payload = {"question": question, "brief": brief}
     r = requests.post(url, json=payload, headers=_req_headers(), timeout=120)
     r.raise_for_status()
@@ -584,6 +587,18 @@ def render_followup_chat(messages: list[dict[str, str]]) -> None:
             st.markdown(content or "")
 
 
+def _sync_followup_complete_from_case(case: dict[str, Any]) -> None:
+    """Align UI with persisted QA so follow-up entry stays off after the turn limit."""
+    ctx = (case or {}).get("context") or {}
+    structured = normalize_encounter_dict(ctx.get("structured_context") or {})
+    qa = structured.get("qa_history") or []
+    answered = sum(1 for r in qa if (r.get("answer") or "").strip())
+    if len(qa) >= MAX_TURNS_DEFAULT and answered >= MAX_TURNS_DEFAULT:
+        st.session_state["followup_complete"] = True
+        st.session_state["latest_turn_no"] = None
+        st.session_state.pop("followup_answer_choices", None)
+
+
 def render_compact_assessment(assessment: dict[str, Any], *, show_differential_shortlist: bool = True) -> None:
     contract = (assessment or {}).get("contract") or {}
     if not contract:
@@ -782,6 +797,7 @@ def main() -> None:
     st.session_state.setdefault("latest_question", None)
     st.session_state.setdefault("latest_turn_no", None)
     st.session_state.setdefault("latest_policy_reason", None)
+    st.session_state.setdefault("followup_complete", False)
     st.session_state.setdefault("followup_chat", [])
     st.session_state.setdefault("doctor_qa_history", [])
     # UI role for optional Admin tab (API auth is controlled by AUTH_DISABLED / JWT on the server).
@@ -876,27 +892,39 @@ def main() -> None:
                         "case_text": build_case_text(age, sex, history, symptoms, medications, allergies, ""),
                     }
                     st.session_state["followup_chat"] = []
+                    st.session_state["followup_complete"] = False
                     st.session_state.pop("followup_pending_followup", None)
                     st.session_state.pop("_followup_chat_input_echo", None)
                     st.session_state.pop("followup_answer_choices", None)
                     status.update(label="Preparing follow-up question…", state="running", expanded=True)
                     try:
                         nq = api_next_question(api_url, encounter_id)
-                        first_q = (nq.get("question") or "").strip()
-                        st.session_state["latest_question"] = first_q or None
-                        st.session_state["latest_turn_no"] = nq.get("turn_no")
-                        st.session_state["latest_policy_reason"] = nq.get("policy_reason")
-                        ac0 = nq.get("answer_choices")
-                        st.session_state["followup_answer_choices"] = (
-                            list(ac0) if isinstance(ac0, list) and len(ac0) > 0 else None
-                        )
-                        if first_q:
-                            st.session_state["followup_chat"].append({"role": "assistant", "content": first_q})
+                        if nq.get("policy_reason") == "max_turns" or nq.get("turn_no") is None:
+                            st.session_state["latest_question"] = None
+                            st.session_state["latest_turn_no"] = None
+                            st.session_state["latest_policy_reason"] = nq.get("policy_reason")
+                            st.session_state.pop("followup_answer_choices", None)
+                            st.session_state["followup_complete"] = True
+                        else:
+                            first_q = (nq.get("question") or "").strip()
+                            st.session_state["latest_question"] = first_q or None
+                            st.session_state["latest_turn_no"] = nq.get("turn_no")
+                            st.session_state["latest_policy_reason"] = nq.get("policy_reason")
+                            ac0 = nq.get("answer_choices")
+                            st.session_state["followup_answer_choices"] = (
+                                list(ac0) if isinstance(ac0, list) and len(ac0) > 0 else None
+                            )
+                            st.session_state["followup_complete"] = False
+                            if first_q:
+                                st.session_state["followup_chat"].append(
+                                    {"role": "assistant", "content": first_q}
+                                )
                     except Exception:
                         st.session_state["latest_question"] = None
                         st.session_state["latest_turn_no"] = None
                         st.session_state["latest_policy_reason"] = None
                         st.session_state.pop("followup_answer_choices", None)
+                        st.session_state["followup_complete"] = False
                     status.update(label="Differential ready.", state="complete", expanded=False)
                     st.success("Differential generated.")
                 except Exception as exc:
@@ -938,21 +966,34 @@ def main() -> None:
             st.divider()
             st.markdown("### Follow-up Chat")
             render_followup_chat(st.session_state.get("followup_chat") or [])
+            if st.session_state.get("followup_complete"):
+                st.info(
+                    f"Follow-up is complete (maximum {MAX_TURNS_DEFAULT} questions for this encounter). "
+                    "Summarize and consider disposition or further workup."
+                )
 
             pend_key = "followup_pending_followup"
             stale = st.session_state.get(pend_key)
             if stale and stale.get("encounter_id") != encounter_id:
                 st.session_state.pop(pend_key, None)
 
+            _sync_followup_complete_from_case(case)
+
             ac_raw = st.session_state.get("followup_answer_choices")
             answer_choices = ac_raw if isinstance(ac_raw, list) and len(ac_raw) > 0 else None
             choices_mode = bool(answer_choices)
             have_pending = bool(st.session_state.get(pend_key))
-            doctor_reply = st.chat_input(
-                "Type your follow-up answer and press Enter",
-                key=f"chat_input_{encounter_id}",
-                disabled=have_pending or choices_mode,
-            )
+            fu_done = bool(st.session_state.get("followup_complete"))
+            if fu_done:
+                doctor_reply = None
+            elif choices_mode or have_pending:
+                # Avoid a disabled chat bar beside checkbox answers; free-text uses chat_input only when needed.
+                doctor_reply = None
+            else:
+                doctor_reply = st.chat_input(
+                    "Reply…",
+                    key=f"chat_input_{encounter_id}",
+                )
             payload = st.session_state.pop(pend_key, None)
 
             def _append_user_followup_line(t: str) -> None:
@@ -965,60 +1006,82 @@ def main() -> None:
                 _qa_perf064("H_dup", "followup_user_appended", {"text_len": len(t), "chat_len": len(fc)})
 
             if payload and isinstance(payload, dict) and payload.get("encounter_id") == encounter_id:
-                text = (payload.get("text") or "").strip()
-                turn_no = int(payload["turn_no"])
-                latest_turn = st.session_state.get("latest_turn_no")
-                if latest_turn is None or int(latest_turn) != turn_no:
-                    st.warning("That follow-up is no longer active; your draft was not sent.")
-                    _qa_perf064("H_dup", "followup_pending_stale_turn", {"turn_no": turn_no, "latest": latest_turn})
-                elif not text:
-                    pass
+                if st.session_state.get("followup_complete"):
+                    st.warning("Follow-up is already complete; that reply was not sent.")
                 else:
-                    st.caption("Sending your reply…")
-                    _append_user_followup_line(text)
-                    try:
-                        prev_names = candidate_name_list(
-                            (st.session_state["case"].get("assessment") or {}).get("top_candidates")
+                    text = (payload.get("text") or "").strip()
+                    turn_no = int(payload["turn_no"])
+                    latest_turn = st.session_state.get("latest_turn_no")
+                    if latest_turn is None or int(latest_turn) != turn_no:
+                        st.warning("That follow-up is no longer active; your draft was not sent.")
+                        _qa_perf064(
+                            "H_dup",
+                            "followup_pending_stale_turn",
+                            {"turn_no": turn_no, "latest": latest_turn},
                         )
-                        upd = api_answer_question(api_url, encounter_id, int(latest_turn), text)
-                        new_names = candidate_name_list(upd.get("top_candidates"))
-                        st.session_state["case"]["assessment"] = upd
-                        st.session_state["case"]["context"] = api_get_context(api_url, encounter_id)
-                        with st.expander("Differential changes after your reply", expanded=True):
-                            st.markdown(format_candidate_diff_markdown(prev_names, new_names))
-                        nq = api_next_question(api_url, encounter_id)
-                        next_q = (nq.get("question") or "").strip()
-                        st.session_state["latest_question"] = next_q or None
-                        st.session_state["latest_turn_no"] = nq.get("turn_no")
-                        st.session_state["latest_policy_reason"] = nq.get("policy_reason")
-                        acn = nq.get("answer_choices")
-                        st.session_state["followup_answer_choices"] = (
-                            list(acn) if isinstance(acn, list) and len(acn) > 0 else None
-                        )
-                        if next_q:
-                            st.session_state["followup_chat"].append({"role": "assistant", "content": next_q})
-                        st.session_state["_followup_chat_input_echo"] = text
-                        st.success("Differential updated from your reply.")
-                        _qa_perf064("H_dup", "followup_commit_ok", {"text_len": len(text)})
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Failed to process follow-up chat: {exc}")
-                        _qa_perf064("H_dup", "followup_commit_err", {"err": type(exc).__name__})
-            elif choices_mode and not have_pending:
+                    elif not text:
+                        pass
+                    else:
+                        st.caption("Sending your reply…")
+                        _append_user_followup_line(text)
+                        try:
+                            prev_names = candidate_name_list(
+                                (st.session_state["case"].get("assessment") or {}).get("top_candidates")
+                            )
+                            upd = api_answer_question(api_url, encounter_id, int(latest_turn), text)
+                            new_names = candidate_name_list(upd.get("top_candidates"))
+                            st.session_state["case"]["assessment"] = upd
+                            st.session_state["case"]["context"] = api_get_context(api_url, encounter_id)
+                            with st.expander("Differential changes after your reply", expanded=True):
+                                st.markdown(format_candidate_diff_markdown(prev_names, new_names))
+                            nq = api_next_question(api_url, encounter_id)
+                            if nq.get("policy_reason") == "max_turns" or nq.get("turn_no") is None:
+                                st.session_state["latest_question"] = None
+                                st.session_state["latest_turn_no"] = None
+                                st.session_state["latest_policy_reason"] = nq.get("policy_reason")
+                                st.session_state.pop("followup_answer_choices", None)
+                                st.session_state["followup_complete"] = True
+                            else:
+                                next_q = (nq.get("question") or "").strip()
+                                st.session_state["latest_question"] = next_q or None
+                                st.session_state["latest_turn_no"] = nq.get("turn_no")
+                                st.session_state["latest_policy_reason"] = nq.get("policy_reason")
+                                acn = nq.get("answer_choices")
+                                st.session_state["followup_answer_choices"] = (
+                                    list(acn) if isinstance(acn, list) and len(acn) > 0 else None
+                                )
+                                st.session_state["followup_complete"] = False
+                                if next_q:
+                                    st.session_state["followup_chat"].append(
+                                        {"role": "assistant", "content": next_q}
+                                    )
+                            st.session_state["_followup_chat_input_echo"] = text
+                            st.success("Differential updated from your reply.")
+                            _qa_perf064("H_dup", "followup_commit_ok", {"text_len": len(text)})
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed to process follow-up chat: {exc}")
+                            _qa_perf064("H_dup", "followup_commit_err", {"err": type(exc).__name__})
+            elif choices_mode and not have_pending and not st.session_state.get("followup_complete"):
                 st.caption(
-                    "Select one option (radio), then **Send reply**. Options speed data entry only; Snowflake assessment time is unchanged."
+                    "Select one or more options (checkboxes), then **Send reply**. Options speed data entry only; Snowflake assessment time is unchanged."
                 )
                 none_l = "None of the above (specify below)"
-                radio_opts: list[str] = list(answer_choices or []) + [none_l]
                 turn_key = int(st.session_state.get("latest_turn_no") or 0)
-                picked = st.radio(
-                    "Your answer",
-                    options=radio_opts,
-                    index=None,
-                    key=f"followup_radio_{encounter_id}_{turn_key}",
+                st.markdown("**Your answer**")
+                picked_regular: list[str] = []
+                for i, opt in enumerate(list(answer_choices or [])):
+                    if st.checkbox(
+                        opt,
+                        key=f"followup_cb_{encounter_id}_{turn_key}_{i}",
+                    ):
+                        picked_regular.append(opt)
+                none_checked = st.checkbox(
+                    none_l,
+                    key=f"followup_cb_none_{encounter_id}_{turn_key}",
                 )
                 other_txt = ""
-                if picked == none_l:
+                if none_checked:
                     other_txt = st.text_area(
                         "Describe your answer",
                         height=72,
@@ -1029,15 +1092,19 @@ def main() -> None:
                     latest_turn = st.session_state.get("latest_turn_no")
                     if latest_turn is None:
                         st.warning("No active follow-up question. Generate differential again to restart chat.")
-                    elif picked is None:
-                        st.warning("Select one of the radio options above.")
-                    elif picked == none_l and not (other_txt or "").strip():
-                        st.warning('Enter details for “None of the above”, or pick another option.')
+                    elif none_checked and picked_regular:
+                        st.warning(
+                            "Use either the listed options or “None of the above”, not both."
+                        )
+                    elif none_checked and not (other_txt or "").strip():
+                        st.warning('Enter details for “None of the above”, or uncheck it and pick listed options.')
+                    elif not none_checked and not picked_regular:
+                        st.warning("Select at least one checkbox above.")
                     else:
-                        if picked == none_l:
+                        if none_checked:
                             composed = f"Other: {(other_txt or '').strip()}"
                         else:
-                            composed = f"Selected: {picked}"
+                            composed = "Selected: " + "; ".join(picked_regular)
                         st.session_state[pend_key] = {
                             "text": composed,
                             "turn_no": int(latest_turn),
@@ -1045,7 +1112,11 @@ def main() -> None:
                         }
                         _qa_perf064("H_dup", "followup_pending_set", {"text_len": len(composed), "turn": int(latest_turn)})
                         st.rerun()
-            elif not choices_mode and doctor_reply:
+            elif (
+                not choices_mode
+                and doctor_reply
+                and not st.session_state.get("followup_complete")
+            ):
                 reply_txt = doctor_reply.strip()
                 if reply_txt == (st.session_state.get("_followup_chat_input_echo") or "").strip():
                     _qa_perf064("H_dup", "followup_ghost_submit_ignored", {"text_len": len(reply_txt)})
@@ -1089,25 +1160,14 @@ def main() -> None:
                 st.rerun()
 
         with st.container(border=True):
-            api_url = st.text_input("API URL", value=st.session_state["api_url"], key="qa_api_url")
-            st.session_state["api_url"] = api_url
-            ai_mode = st.radio(
-                "Provider",
-                ["Auto (Cortex → Gemini fallback)", "Cortex Only (MedRAG)", "Gemini Only", "Compare Both"],
-                key="qa_mode",
-            )
+            api_url = st.session_state["api_url"]
+            ai_mode = _DOCTOR_QA_AI_MODE
             question = st.text_area("Ask a clinical question", height=110, key="doctor_rag_question")
             include_case = st.checkbox(
                 "Include current encounter context",
                 value=True,
                 key="qa_include_case",
                 help="Prepends the intake-derived case summary from the Differential tab. Prior Q&A replies in this session are added automatically when you have history.",
-            )
-            qa_brief = st.checkbox(
-                "Brief answers (faster)",
-                value=False,
-                key="qa_brief",
-                help="Sends brief=true to /ask and /ask-both: shorter prompt template and bullet-style output, usually quicker to generate.",
             )
             ask_clicked = st.button("Ask", key="doctor_rag_submit")
         if ask_clicked:
@@ -1134,112 +1194,120 @@ def main() -> None:
                         "final_q_chars": len(final_question),
                         "has_prior_blk": bool(prior_blk),
                         "include_case": bool(include_case and case_text),
-                        "brief": bool(qa_brief),
+                        "brief": False,
                     },
                 )
                 # endregion
                 try:
-                    st.divider()
-                    t_api = time.perf_counter()
-                    if ai_mode == "Compare Both":
-                        _qa_perf064("H1", "ask_route_start", {"mode": "compare_both"})
-                        results = ask_both(api_url=api_url, question=final_question, brief=qa_brief)
-                        _qa_perf064(
-                            "H1",
-                            "ask_route_done",
-                            {"elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2), "mode": "compare_both"},
-                        )
-                        col_g, col_c = st.columns(2)
-                        with col_g:
-                            st.markdown("### Gemini")
-                            st.markdown(results.get("gemini") or "_Empty response_")
-                        with col_c:
-                            st.markdown("### Cortex")
-                            st.markdown(results.get("cortex") or "_Empty response_")
-                        g = results.get("gemini") or ""
-                        c = results.get("cortex") or ""
-                        body = f"### Gemini\n{g}\n\n### Cortex\n{c}"
-                        st.session_state["doctor_qa_history"].append(
-                            {
-                                "user_q": q,
-                                "answer_preview": (g + "\n" + c)[:500],
-                                "body_md": body,
-                            }
-                        )
-                        _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
-                        st.rerun()
-                    elif ai_mode == "Cortex Only (MedRAG)":
-                        _qa_perf064("H1", "ask_route_start", {"mode": "cortex_only"})
-                        cx = ask_cortex(api_url=api_url, question=final_question) or "_Empty response_"
-                        _qa_perf064(
-                            "H1",
-                            "ask_route_done",
-                            {"elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2), "mode": "cortex_only"},
-                        )
-                        st.markdown(cx)
-                        st.session_state["doctor_qa_history"].append(
-                            {"user_q": q, "answer_preview": str(cx)[:500], "body_md": str(cx)}
-                        )
-                        _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
-                        st.rerun()
-                    else:
-                        _qa_perf064("H1", "ask_route_start", {"mode": ai_mode})
-                        result = ask_llm(api_url=api_url, question=final_question, brief=qa_brief)
-                        _qa_perf064(
-                            "H1",
-                            "ask_route_done",
-                            {
-                                "elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2),
-                                "mode": ai_mode,
-                                "provider": result.get("provider"),
-                            },
-                        )
-                        st.markdown(f"**Provider:** `{result.get('provider', '?')}`")
-                        if result.get("fallback_mode"):
-                            st.caption(f"Evidence mode: `{result.get('fallback_mode')}`")
-                        eq = result.get("evidence_quality") or {}
-                        if eq:
-                            st.caption(
-                                f"Evidence quality: score={eq.get('score')} "
-                                f"(trusted={eq.get('trusted_count')}, total={eq.get('count')})"
+                    with st.spinner("Retrieving evidence and generating answer…"):
+                        st.divider()
+                        t_api = time.perf_counter()
+                        if ai_mode == "Compare Both":
+                            _qa_perf064("H1", "ask_route_start", {"mode": "compare_both"})
+                            results = ask_both(api_url=api_url, question=final_question, brief=False)
+                            _qa_perf064(
+                                "H1",
+                                "ask_route_done",
+                                {"elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2), "mode": "compare_both"},
                             )
-                        if result.get("insufficient_evidence"):
-                            st.warning("Evidence is insufficient for a confident clinical answer.")
-                        ans = result.get("answer") or "_Empty response_"
-                        st.markdown(ans)
-                        fu = result.get("follow_up_questions") or []
-                        if fu:
-                            st.markdown("### What to ask next")
-                            for qx in fu[:4]:
-                                st.markdown(f"- {qx}")
-                        render_evidence_block(result.get("evidence_summary"), result.get("evidence_sources"))
-                        parts_hist: list[str] = [
-                            f"**Provider:** `{result.get('provider', '?')}`",
-                        ]
-                        if result.get("fallback_mode"):
-                            parts_hist.append(f"Evidence mode: `{result.get('fallback_mode')}`")
-                        if eq:
-                            parts_hist.append(
-                                f"Evidence quality: score={eq.get('score')} "
-                                f"(trusted={eq.get('trusted_count')}, total={eq.get('count')})"
+                            col_g, col_c = st.columns(2)
+                            with col_g:
+                                st.markdown("### Gemini")
+                                st.markdown(results.get("gemini") or "_Empty response_")
+                            with col_c:
+                                st.markdown("### Cortex")
+                                st.markdown(results.get("cortex") or "_Empty response_")
+                            g = results.get("gemini") or ""
+                            c = results.get("cortex") or ""
+                            body = f"### Gemini\n{g}\n\n### Cortex\n{c}"
+                            st.session_state["doctor_qa_history"].append(
+                                {
+                                    "user_q": q,
+                                    "answer_preview": (g + "\n" + c)[:500],
+                                    "body_md": body,
+                                }
                             )
-                        if result.get("insufficient_evidence"):
-                            parts_hist.append("_(Insufficient evidence flag set.)_")
-                        parts_hist.append(ans)
-                        if fu:
-                            parts_hist.append("### What to ask next")
-                            for qx in fu[:4]:
-                                parts_hist.append(f"- {qx}")
-                        hist_body = "\n\n".join(parts_hist) + "\n\n### Evidence (brief)\n" + (result.get("evidence_summary") or "")
-                        st.session_state["doctor_qa_history"].append(
-                            {
-                                "user_q": q,
-                                "answer_preview": (result.get("answer") or "")[:500],
-                                "body_md": hist_body,
-                            }
-                        )
-                        _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
-                        st.rerun()
+                            _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
+                            st.rerun()
+                        elif ai_mode == "Cortex Only (MedRAG)":
+                            _qa_perf064("H1", "ask_route_start", {"mode": "cortex_only"})
+                            cx = ask_cortex(api_url=api_url, question=final_question) or "_Empty response_"
+                            _qa_perf064(
+                                "H1",
+                                "ask_route_done",
+                                {"elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2), "mode": "cortex_only"},
+                            )
+                            st.markdown(cx)
+                            st.session_state["doctor_qa_history"].append(
+                                {"user_q": q, "answer_preview": str(cx)[:500], "body_md": str(cx)}
+                            )
+                            _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
+                            st.rerun()
+                        else:
+                            _qa_perf064("H1", "ask_route_start", {"mode": ai_mode})
+                            result = ask_llm(api_url=api_url, question=final_question, brief=False)
+                            _qa_perf064(
+                                "H1",
+                                "ask_route_done",
+                                {
+                                    "elapsed_ms": round((time.perf_counter() - t_api) * 1000, 2),
+                                    "mode": ai_mode,
+                                    "provider": result.get("provider"),
+                                },
+                            )
+                            st.markdown(f"**Provider:** `{result.get('provider', '?')}`")
+                            fc = result.get("fallback_chain")
+                            if fc:
+                                st.caption(f"LLM path: `{' → '.join(fc)}`")
+                            if result.get("fallback_mode"):
+                                st.caption(f"Evidence mode: `{result.get('fallback_mode')}`")
+                            eq = result.get("evidence_quality") or {}
+                            if eq:
+                                st.caption(
+                                    f"Evidence quality: score={eq.get('score')} "
+                                    f"(trusted={eq.get('trusted_count')}, total={eq.get('count')})"
+                                )
+                            if result.get("insufficient_evidence"):
+                                st.warning("Evidence is insufficient for a confident clinical answer.")
+                            ans = result.get("answer") or "_Empty response_"
+                            st.markdown(ans)
+                            fu = result.get("follow_up_questions") or []
+                            if fu:
+                                st.markdown("### What to ask next")
+                                for qx in fu[:4]:
+                                    st.markdown(f"- {qx}")
+                            render_evidence_block(result.get("evidence_summary"), result.get("evidence_sources"))
+                            parts_hist: list[str] = [
+                                f"**Provider:** `{result.get('provider', '?')}`",
+                            ]
+                            if result.get("fallback_chain"):
+                                parts_hist.append(
+                                    "LLM path: `" + " → ".join(str(x) for x in result["fallback_chain"]) + "`"
+                                )
+                            if result.get("fallback_mode"):
+                                parts_hist.append(f"Evidence mode: `{result.get('fallback_mode')}`")
+                            if eq:
+                                parts_hist.append(
+                                    f"Evidence quality: score={eq.get('score')} "
+                                    f"(trusted={eq.get('trusted_count')}, total={eq.get('count')})"
+                                )
+                            if result.get("insufficient_evidence"):
+                                parts_hist.append("_(Insufficient evidence flag set.)_")
+                            parts_hist.append(ans)
+                            if fu:
+                                parts_hist.append("### What to ask next")
+                                for qx in fu[:4]:
+                                    parts_hist.append(f"- {qx}")
+                            hist_body = "\n\n".join(parts_hist) + "\n\n### Evidence (brief)\n" + (result.get("evidence_summary") or "")
+                            st.session_state["doctor_qa_history"].append(
+                                {
+                                    "user_q": q,
+                                    "answer_preview": (result.get("answer") or "")[:500],
+                                    "body_md": hist_body,
+                                }
+                            )
+                            _qa_perf064("H3", "qa_history_appended", {"history_len": len(st.session_state["doctor_qa_history"])})
+                            st.rerun()
                 except Exception as exc:
                     st.error(f"Q&A failed: {exc}")
                     _qa_perf064("H4", "ask_route_error", {"error_type": type(exc).__name__})
