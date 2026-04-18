@@ -1,10 +1,10 @@
-**project log link -** https://northeastern-my.sharepoint.com/:w:/g/personal/ganeshe_n_northeastern_edu/IQA3_QRp630OSZunye-64xC8Acax5ZQ9c4tVhoLtLVS9uJQ?e=CYpnsQ
-
 # MedAssist.AI
 
 **MedAssist.AI** is a clinical decision-support **research and prototyping** platform. It combines open medical data, a **Snowflake-backed knowledge graph** (symptom–disease edges from Orphanet-derived maps), **semantic RAG** (ChromaDB), **literature retrieval** (PubMed, PMC, NCBI Bookshelf, OpenStax in Snowflake), **live medical APIs** (NCBI E-utilities, Europe PMC) for backup when local evidence is thin, and **LLM reasoning** via **Snowflake Cortex** and/or **Google Vertex AI (Gemini)**.
 
 > **Important:** This software is **not** a medical device and **does not** replace professional judgment. It is for **education, research, and engineering demos**. Follow local regulations and clinical governance for any real-world use.
+
+**project log link -** https://northeastern-my.sharepoint.com/:w:/g/personal/ganeshe_n_northeastern_edu/IQA3_QRp630OSZunye-64xC8Acax5ZQ9c4tVhoLtLVS9uJQ?e=CYpnsQ
 
 ---
 
