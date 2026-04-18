@@ -25,3 +25,7 @@ structlog>=24.1.0
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
 opentelemetry-instrumentation-fastapi>=0.43b0
+# DAG orchestration (pin aligned with start_airflow.sh). Install with: pip install -r requirements.txt
+# Do not combine the full requirements file with Airflow’s official constraints URL here: it pins google-genai below our app’s google-genai>=1.65.0 and resolution fails.
+apache-airflow==3.1.7
+apache-airflow-providers-standard>=1.0.0

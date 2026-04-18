@@ -1,3 +1,5 @@
+**project log link -** https://northeastern-my.sharepoint.com/:w:/g/personal/ganeshe_n_northeastern_edu/IQA3_QRp630OSZunye-64xC8Acax5ZQ9c4tVhoLtLVS9uJQ?e=CYpnsQ
+
 # MedAssist.AI
 
 **MedAssist.AI** is a clinical decision-support **research and prototyping** platform. It combines open medical data, a **Snowflake-backed knowledge graph** (symptom–disease edges from Orphanet-derived maps), **semantic RAG** (ChromaDB), **literature retrieval** (PubMed, PMC, NCBI Bookshelf, OpenStax in Snowflake), **live medical APIs** (NCBI E-utilities, Europe PMC) for backup when local evidence is thin, and **LLM reasoning** via **Snowflake Cortex** and/or **Google Vertex AI (Gemini)**.
@@ -335,16 +337,6 @@ See also [`scripts/pre_release_check.sh`](scripts/pre_release_check.sh).
 
 ---
 
-## Deployment notes
-
-- Run API: `uvicorn api.main:app --host 0.0.0.0 --port 8000` (or behind a process manager).
-- Set **`STREAMLIT_PUBLIC_URL`** to your **public Streamlit URL** so `/` redirects correctly.
-- Run Streamlit separately or via the same host. Server-side `requests` from Streamlit to the API do not use browser CORS; set **`CORS_ORIGINS`** if you add other browser clients.
-- For production, prefer **`AUTH_DISABLED=0`**, issue JWTs via **`POST /auth/login`**, and pass **`Authorization: Bearer …`** from clients that support it (the stock Streamlit app is oriented toward **`AUTH_DISABLED=1`** for demos).
-- Inject Snowflake and GCP secrets via your platform’s secret manager.
-- Populate **`NORMALIZED.SYMPTOM_DISEASE_MAP`** and seed **`KNOWLEDGE_GRAPH`** before relying on KG differentials in production.
-
----
 
 ## Further reading
 

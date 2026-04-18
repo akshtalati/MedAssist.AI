@@ -6,3 +6,22 @@ gatherUsageStats = false
 
 [client]
 toolbarMode = "minimal"
+
+# [theme.light] / [theme.dark] are required so "Use system setting" can apply
+# matching custom colors when the OS switches light/dark (Streamlit >= 1.51).
+[theme]
+base = "light"
+
+[theme.light]
+primaryColor = "#2bb0ed"
+backgroundColor = "#f4f8fc"
+secondaryBackgroundColor = "#d4ebf7"
+textColor = "#0c1d2e"
+font = "sans serif"
+
+[theme.dark]
+primaryColor = "#4cc9f0"
+backgroundColor = "#0a1628"
+secondaryBackgroundColor = "#121f33"
+textColor = "#e8eef4"
+font = "sans serif"

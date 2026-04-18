@@ -218,7 +218,9 @@ if not VERTEX_AI_DATASTORE_PATH and os.environ.get("VERTEX_AI_DATASTORE_ID"):
     )
 
 CLINICAL_USE_CORTEX = os.environ.get("CLINICAL_USE_CORTEX", "0") == "1"
-CLINICAL_MAX_TURNS = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFAULT)))
+_CLINICAL_MAX_TURNS_RAW = int(os.environ.get("CLINICAL_MAX_TURNS", str(MAX_TURNS_DEFAULT)))
+# Never exceed policy default (5); env may only lower the limit.
+CLINICAL_MAX_TURNS = min(max(1, _CLINICAL_MAX_TURNS_RAW), MAX_TURNS_DEFAULT)
 FOLLOWUP_SELF_CRITIQUE = os.environ.get("FOLLOWUP_SELF_CRITIQUE", "").strip().lower() in ("1", "true", "yes")
 
 
@@ -2194,8 +2196,15 @@ def next_question(encounter_id: str, user: CurrentUser):
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
 
-    turn_no = next_turn_no(encounter_id)
     question_text, policy_reason, answer_choices = policy_next_question(encounter, max_turns=CLINICAL_MAX_TURNS)
+    if policy_reason == "max_turns":
+        return {
+            "encounter_id": encounter_id,
+            "turn_no": None,
+            "question": question_text,
+            "policy_reason": policy_reason,
+            "answer_choices": None,
+        }
     if not question_text:
         question_text = "What is the symptom timeline and which symptom started first?"
         answer_choices = None
@@ -2205,6 +2214,15 @@ def next_question(encounter_id: str, user: CurrentUser):
             max_turns=CLINICAL_MAX_TURNS,
             skip_questions=(question_text,),
         )
+        if policy_reason == "max_turns":
+            return {
+                "encounter_id": encounter_id,
+                "turn_no": None,
+                "question": question_text,
+                "policy_reason": policy_reason,
+                "answer_choices": None,
+            }
+    turn_no = next_turn_no(encounter_id)
     add_question(encounter_id, turn_no, question_text)
     return {
         "encounter_id": encounter_id,

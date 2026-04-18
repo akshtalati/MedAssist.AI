@@ -1,6 +1,17 @@
 from src.followup_policy import next_question
 
 
+def test_followup_policy_stops_after_max_turns():
+    encounter = {
+        "symptoms": [{"symptom": "fever"}],
+        "qa_history": [{"turn_no": i, "question": f"q{i}", "answer": f"a{i}"} for i in range(1, 6)],
+    }
+    q, reason, choices = next_question(encounter, max_turns=5)
+    assert reason == "max_turns"
+    assert choices is None
+    assert "Maximum follow-up" in q
+
+
 def test_followup_policy_avoids_repeat():
     encounter = {
         "symptoms": [{"symptom": "fever"}],
