@@ -46,6 +46,13 @@ except Exception:
     SentenceTransformer = None
 
 from src.snowflake_client import get_connection
+from src.snowflake_cortex_agent_client import (
+    CortexAgentRequestError,
+    agent_config_from_env,
+    extract_text_from_agent_response,
+    is_cortex_agent_ready,
+    run_cortex_agent_object,
+)
 from src.clinical_workflow import (
     EncounterInput,
     answer_and_update_tx,
@@ -459,6 +466,15 @@ def index():
 class Question(BaseModel):
     question: str
     brief: bool = False  # if True, use short answer + references only
+
+
+class AgentQuestion(BaseModel):
+    """Direct Snowflake Cortex Agent REST :run (for debugging or external clients)."""
+
+    question: str
+    thread_id: int | None = None
+    parent_message_id: int | None = None
+    debug: bool = False
 
 
 class SymptomInput(BaseModel):
@@ -1394,16 +1410,21 @@ def _build_differential_evidence_query(encounter: dict, candidates: list[dict]) 
     return "; ".join(parts) or "clinical differential evidence"
 
 
-@app.post("/ask")
-def ask(question: Question, user: CurrentUser):
+def _medassist_hybrid_answer(
+    question: Question,
+    *,
+    endpoint_name: str,
+    prefer_cortex_agent: bool,
+) -> dict:
     """
-    Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
-    and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
+    Hybrid literature + Orphanet context, then LLM.
+
+    If ``prefer_cortex_agent`` and env is configured, try Snowflake Cortex Agent REST first;
+    then Snowflake Cortex COMPLETE, then Gemini (same as classic ``/ask``).
     """
     t_ask0 = time.perf_counter()
     evidence_entries, fallback_mode = retrieve_evidence_journal_first(question.question, limit=30)
     literature = _format_literature_context(evidence_entries)
-    # 2) Add symptom → rare-disease matches when the question looks like symptoms
     symptom_block = fetch_symptom_disease_context(question.question, limit=50)
 
     context = literature
@@ -1416,7 +1437,6 @@ def ask(question: Question, user: CurrentUser):
         else _build_medassist_prompt(question.question, context)
     )
 
-    # Default provider chain: Cortex first, Gemini fallback.
     evidence_sources = _normalize_evidence_entries(evidence_entries[:6], mode=fallback_mode)
     evidence_summary = _short_evidence_summary(evidence_entries, fallback_mode=fallback_mode)
     evidence_quality = _evaluate_evidence_quality(evidence_entries)
@@ -1427,7 +1447,7 @@ def ask(question: Question, user: CurrentUser):
             "What immediate red-flag vitals/labs/imaging are available?",
         ]
         log_assessment_metrics(
-            run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+            run_name=f"{endpoint_name}_{hash_payload({'q': question.question})[:16]}",
             metrics={
                 "evidence_quality_score": float(evidence_quality["score"]),
                 "evidence_trusted_count": int(evidence_quality["trusted_count"]),
@@ -1436,9 +1456,9 @@ def ask(question: Question, user: CurrentUser):
                 "llm_latency_ms": 0.0,
                 "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
             },
-            tags={"endpoint": "ask", "provider": "none", "fallback_mode": "insufficient"},
+            tags={"endpoint": endpoint_name, "provider": "none", "fallback_mode": "insufficient"},
         )
-        return {
+        out_ins: dict = {
             "answer": (
                 "Insufficient high-quality evidence for a reliable answer right now. "
                 "Please provide additional clinical details; re-querying will improve grounded output."
@@ -1451,13 +1471,61 @@ def ask(question: Question, user: CurrentUser):
             "insufficient_evidence": True,
             "follow_up_questions": followups,
         }
+        if prefer_cortex_agent:
+            out_ins["fallback_chain"] = []
+        return out_ins
+
+    fallback_chain: list[str] = []
+
+    if prefer_cortex_agent and is_cortex_agent_ready():
+        try:
+            cfg = agent_config_from_env()
+            payload, _ = run_cortex_agent_object(
+                database=cfg["database"],
+                schema=cfg["schema"],
+                agent_name=cfg["agent_name"],
+                user_text=question.question.strip(),
+                stream=False,
+                collect_debug=False,
+            )
+            agent_ans = extract_text_from_agent_response(payload)
+            if agent_ans.strip():
+                fallback_chain.append("snowflake_cortex_agent")
+                log_assessment_metrics(
+                    run_name=f"{endpoint_name}_{hash_payload({'q': question.question})[:16]}",
+                    metrics={
+                        "evidence_quality_score": float(evidence_quality["score"]),
+                        "evidence_trusted_count": int(evidence_quality["trusted_count"]),
+                        "evidence_total_count": int(evidence_quality["count"]),
+                        "llm_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
+                        "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
+                    },
+                    tags={
+                        "endpoint": endpoint_name,
+                        "provider": "snowflake_cortex_agent",
+                        "fallback_mode": fallback_mode,
+                    },
+                )
+                return {
+                    "answer": agent_ans,
+                    "provider": "snowflake_cortex_agent",
+                    "fallback_mode": fallback_mode,
+                    "evidence_summary": evidence_summary,
+                    "evidence_sources": evidence_sources,
+                    "evidence_quality": evidence_quality,
+                    "insufficient_evidence": False,
+                    "fallback_chain": list(fallback_chain),
+                }
+        except Exception:
+            pass
 
     t_llm = time.perf_counter()
     answer_cortex = cortex_complete(prompt)
     llm_ms = round((time.perf_counter() - t_llm) * 1000, 2)
+    fallback_chain.append("cortex")
     if _is_valid_cortex_answer(answer_cortex):
         log_assessment_metrics(
-            run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+            run_name=f"{endpoint_name}_{hash_payload({'q': question.question})[:16]}",
             metrics={
                 "evidence_quality_score": float(evidence_quality["score"]),
                 "evidence_trusted_count": int(evidence_quality["trusted_count"]),
@@ -1465,9 +1533,9 @@ def ask(question: Question, user: CurrentUser):
                 "llm_latency_ms": float(llm_ms),
                 "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
             },
-            tags={"endpoint": "ask", "provider": "cortex", "fallback_mode": fallback_mode},
+            tags={"endpoint": endpoint_name, "provider": "cortex", "fallback_mode": fallback_mode},
         )
-        return {
+        out_c: dict = {
             "answer": answer_cortex,
             "provider": "cortex",
             "fallback_mode": fallback_mode,
@@ -1476,12 +1544,16 @@ def ask(question: Question, user: CurrentUser):
             "evidence_quality": evidence_quality,
             "insufficient_evidence": False,
         }
+        if prefer_cortex_agent:
+            out_c["fallback_chain"] = list(fallback_chain)
+        return out_c
 
     t_llm2 = time.perf_counter()
     answer_gemini = _generate_with_gemini(prompt)
     llm_ms_g = round((time.perf_counter() - t_llm2) * 1000, 2)
+    fallback_chain.append("gemini")
     log_assessment_metrics(
-        run_name=f"ask_{hash_payload({'q': question.question})[:16]}",
+        run_name=f"{endpoint_name}_{hash_payload({'q': question.question})[:16]}",
         metrics={
             "evidence_quality_score": float(evidence_quality["score"]),
             "evidence_trusted_count": int(evidence_quality["trusted_count"]),
@@ -1489,9 +1561,9 @@ def ask(question: Question, user: CurrentUser):
             "llm_latency_ms": float(llm_ms + llm_ms_g),
             "total_latency_ms": round((time.perf_counter() - t_ask0) * 1000, 2),
         },
-        tags={"endpoint": "ask", "provider": "gemini", "fallback_mode": fallback_mode},
+        tags={"endpoint": endpoint_name, "provider": "gemini", "fallback_mode": fallback_mode},
     )
-    return {
+    out_g: dict = {
         "answer": answer_gemini,
         "provider": "gemini",
         "fallback_from": "cortex",
@@ -1502,6 +1574,108 @@ def ask(question: Question, user: CurrentUser):
         "evidence_quality": evidence_quality,
         "insufficient_evidence": False,
     }
+    if prefer_cortex_agent:
+        out_g["fallback_chain"] = list(fallback_chain)
+    return out_g
+
+
+@app.post("/ask")
+def ask(question: Question, user: CurrentUser):
+    """
+    Answer a clinical question using all literature sources (PubMed, PMC, NCBI Bookshelf, OpenStax)
+    and the symptom→disease index (Orphanet). Data is searched in Snowflake in one place.
+    """
+    return _medassist_hybrid_answer(question, endpoint_name="ask", prefer_cortex_agent=False)
+
+
+@app.post("/ask-doctor")
+def ask_doctor(question: Question, user: CurrentUser):
+    """
+    Doctor Q&A default path: try **Snowflake Cortex Agent** (REST) when configured and evidence
+    is sufficient; otherwise same behavior as ``POST /ask`` (Cortex COMPLETE → Gemini).
+    """
+    return _medassist_hybrid_answer(question, endpoint_name="ask-doctor", prefer_cortex_agent=True)
+
+
+@app.post("/ask-agent")
+def ask_agent(body: AgentQuestion, user: CurrentUser):
+    """
+    Call only the Snowflake Cortex Agent ``:run`` API (no MedAssist hybrid retrieval).
+
+    Requires ``SNOWFLAKE_REST_PAT`` and agent coordinates (``SNOWFLAKE_CORTEX_AGENT_FQN`` or
+    ``SNOWFLAKE_CORTEX_AGENT_*``). Optional ``debug`` or env ``SNOWFLAKE_CORTEX_AGENT_DEBUG=1``
+    returns ``agent_debug`` (no PAT).
+    """
+    if body.thread_id is not None and body.parent_message_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="parent_message_id is required when thread_id is set.",
+        )
+    if body.parent_message_id is not None and body.thread_id is None:
+        raise HTTPException(status_code=400, detail="thread_id is required when parent_message_id is set.")
+
+    try:
+        cfg = agent_config_from_env()
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    messages = None
+    if body.thread_id is not None:
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": body.question.strip()}],
+            }
+        ]
+
+    collect_debug = bool(body.debug) or (
+        os.environ.get("SNOWFLAKE_CORTEX_AGENT_DEBUG", "").strip().lower() in ("1", "true", "yes")
+    )
+
+    try:
+        payload, agent_debug = run_cortex_agent_object(
+            database=cfg["database"],
+            schema=cfg["schema"],
+            agent_name=cfg["agent_name"],
+            user_text=body.question.strip(),
+            messages=messages,
+            thread_id=body.thread_id,
+            parent_message_id=body.parent_message_id,
+            stream=False,
+            collect_debug=collect_debug,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except CortexAgentRequestError as e:
+        if collect_debug and getattr(e, "debug", None):
+            raise HTTPException(
+                status_code=502,
+                detail={"message": str(e), "agent_debug": e.debug},
+            ) from e
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Cortex Agent request failed: {e}") from e
+
+    answer = extract_text_from_agent_response(payload)
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+
+    out: dict = {
+        "answer": answer or "(Agent returned no text blocks.)",
+        "provider": "snowflake_cortex_agent",
+        "agent_database": cfg["database"],
+        "agent_schema": cfg["schema"],
+        "agent_name": cfg["agent_name"],
+        "warnings": warnings,
+        "metadata": meta,
+    }
+    if collect_debug and agent_debug is not None:
+        try:
+            raw = json.dumps(payload, default=str)
+        except Exception:
+            raw = str(payload)[:8000]
+        out["agent_debug"] = {**agent_debug, "response_json_truncated": raw[:12000]}
+    return out
 
 
 @app.post("/ask-both")

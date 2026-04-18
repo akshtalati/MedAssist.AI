@@ -22,8 +22,8 @@ from src.clinical_workflow import normalize_encounter_dict
 from src.followup_policy import MAX_TURNS_DEFAULT
 
 DEFAULT_API_URL = os.environ.get("MEDASSIST_API_BASE", "http://127.0.0.1:8000")
-# Doctor Q&A uses /ask (Cortex with Gemini fallback on the server); API base URL is set in the sidebar only.
-_DOCTOR_QA_AI_MODE = "Auto (Cortex → Gemini fallback)"
+# Doctor Q&A uses /ask-doctor: Snowflake Cortex Agent first (if PAT+agent env set), else Cortex → Gemini.
+_DOCTOR_QA_AI_MODE = "Doctor default (Agent → Cortex → Gemini)"
 _log = logging.getLogger("medassist.streamlit")
 
 # region agent log
@@ -328,7 +328,7 @@ def query_rare_diseases(symptoms: list[str], max_rows: int) -> tuple[list[dict[s
 
 
 def ask_llm(api_url: str, question: str, brief: bool) -> dict:
-    url = api_url.rstrip("/") + "/ask"
+    url = api_url.rstrip("/") + "/ask-doctor"
     payload = {"question": question, "brief": brief}
     r = requests.post(url, json=payload, headers=_req_headers(), timeout=120)
     r.raise_for_status()
@@ -1256,6 +1256,9 @@ def main() -> None:
                                 },
                             )
                             st.markdown(f"**Provider:** `{result.get('provider', '?')}`")
+                            fc = result.get("fallback_chain")
+                            if fc:
+                                st.caption(f"LLM path: `{' → '.join(fc)}`")
                             if result.get("fallback_mode"):
                                 st.caption(f"Evidence mode: `{result.get('fallback_mode')}`")
                             eq = result.get("evidence_quality") or {}
@@ -1277,6 +1280,10 @@ def main() -> None:
                             parts_hist: list[str] = [
                                 f"**Provider:** `{result.get('provider', '?')}`",
                             ]
+                            if result.get("fallback_chain"):
+                                parts_hist.append(
+                                    "LLM path: `" + " → ".join(str(x) for x in result["fallback_chain"]) + "`"
+                                )
                             if result.get("fallback_mode"):
                                 parts_hist.append(f"Evidence mode: `{result.get('fallback_mode')}`")
                             if eq:
